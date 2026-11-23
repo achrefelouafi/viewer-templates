@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        template: [listing, pascal]
+        template: [listing, pascal, minimal]
     defaults:
       run:
         working-directory: ${{ matrix.template }}
@@ -45,9 +45,9 @@ jobs:
       # pascal renders full 3D scenes; without a GPU that takes minutes, so its browser tests run
       # on the author's machine before a pull request and here only on a manual run.
       - run: npx playwright install --with-deps chromium
-        if: matrix.template == 'listing' || github.event_name == 'workflow_dispatch'
+        if: matrix.template != 'pascal' || github.event_name == 'workflow_dispatch'
       - run: npm run test:e2e
-        if: matrix.template == 'listing' || github.event_name == 'workflow_dispatch'
+        if: matrix.template != 'pascal' || github.event_name == 'workflow_dispatch'
       - run: npm run deploy:dry
         if: matrix.template == 'pascal'
         env:
@@ -59,3 +59,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: diff -r listing/src/pascal pascal/src/pascal
+      - run: diff -r listing/src/pascal minimal/src/pascal
