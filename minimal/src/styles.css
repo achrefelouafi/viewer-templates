@@ -1,0 +1,1523 @@
+:root {
+  /* Keep --bg in step with STYLE.background, --ink with STYLE.line and --highlight with
+     STYLE.accent in src/viewer/style.ts. */
+  --bg: #f6f6f3;
+  --surface: rgba(255, 255, 255, 0.94);
+  --surface-solid: #ffffff;
+  --text: #1a1b1f;
+  --muted: #5c5f66;
+  --border: rgba(26, 27, 31, 0.18);
+  --line: rgba(26, 27, 31, 0.1);
+  --tint: rgba(26, 27, 31, 0.06);
+  --tint-strong: rgba(26, 27, 31, 0.1);
+  --hot: #ededea;
+  --ink: #26282d;
+  --accent: #1a1b1f;
+  --accent-text: #ffffff;
+  --highlight: #3550e0;
+  --highlight-strong: #2838b8;
+  /*
+   * The one tint for what is pointed at: a Spaces row, and the room's floor in the drawing
+   * (STYLE.hover). Solid --highlight is for what is selected; --tint-strong marks the floor shown.
+   */
+  --highlight-soft: #dce3ff;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --r-panel: 8px;
+  --r-control: 6px;
+  --shadow: 0 1px 2px rgba(26, 27, 31, 0.06), 0 8px 24px rgba(26, 27, 31, 0.08);
+  --t-fast: 160ms;
+  --t-enter: 240ms;
+  --t-exit: 160ms;
+  --edge: 16px;
+  --ctl: 40px;
+  --nav-w: 280px;
+  --insp-w: 320px;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --ctl: 44px;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.app {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+
+.app canvas {
+  touch-action: none;
+}
+
+.button {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 9px 14px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.button:hover {
+  border-color: rgba(38, 40, 45, 0.35);
+}
+
+.button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--highlight);
+  outline-offset: 2px;
+}
+
+/* A screen's main action. Other buttons keep the plain surface style. */
+.button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.button.primary:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Stacks a button's labels in one cell, so it keeps the width of the longest. */
+.button-labels {
+  display: inline-grid;
+}
+
+.button-labels > * {
+  grid-area: 1 / 1;
+}
+
+.invisible {
+  visibility: hidden;
+}
+
+/* ───── Overlay: floating chrome over the drawing ───── */
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.icon {
+  display: block;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.app :where(button, input) {
+  font: inherit;
+  color: inherit;
+}
+
+.app :where(h1, h2, h3, p, dl, dd, ul) {
+  margin: 0;
+  padding: 0;
+}
+
+.app ul {
+  list-style: none;
+}
+
+.app :focus-visible {
+  outline: 2px solid var(--highlight);
+  outline-offset: 2px;
+}
+
+.chrome-surface {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+/* Title and the spaces button, top left. */
+.masthead {
+  position: absolute;
+  top: var(--edge);
+  left: var(--edge);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: calc(100vw - 2 * var(--edge));
+  pointer-events: none;
+}
+
+.masthead > * {
+  pointer-events: auto;
+}
+
+/* A paper backing, so the drawing's lines never run through the title. */
+.title {
+  align-self: flex-start;
+  padding: 4px 8px;
+  border-radius: var(--r-control);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.title h1 {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.375;
+  letter-spacing: -0.01em;
+}
+
+.title p {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.spaces-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 8px;
+  min-height: var(--ctl);
+  padding: 0 12px 0 8px;
+  border-radius: var(--r-control);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--t-fast) ease-out;
+}
+
+.spaces-toggle .meta {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.spaces-toggle .chevron {
+  transition: transform var(--t-fast) ease-out;
+}
+
+.spaces-toggle[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
+}
+
+@media (hover: hover) {
+  .spaces-toggle:hover {
+    background: var(--surface-solid);
+    border-color: var(--border);
+  }
+}
+
+/* Panels share their enter and exit. */
+.panel {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-panel);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition:
+    opacity var(--t-exit) ease-in,
+    transform var(--t-exit) ease-in,
+    visibility 0s linear var(--t-exit);
+}
+
+.panel.is-open {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    opacity var(--t-enter) ease-out,
+    transform var(--t-enter) ease-out,
+    visibility 0s;
+}
+
+.nav {
+  top: 124px;
+  left: var(--edge);
+  width: var(--nav-w);
+  max-height: calc(100% - 124px - 96px);
+}
+
+.insp {
+  top: var(--edge);
+  right: var(--edge);
+  width: var(--insp-w);
+  max-height: calc(100% - var(--edge) - 96px);
+}
+
+/* The spaces panel. */
+.nav-search {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 12px 8px;
+}
+
+.nav-search label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-box .icon {
+  position: absolute;
+  left: 10px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.search-box input {
+  display: block;
+  width: 100%;
+  height: var(--ctl);
+  padding: 0 12px 0 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface-solid);
+  font-size: 16px;
+}
+
+.search-box input::placeholder {
+  color: var(--muted);
+}
+
+.search-box input:focus-visible {
+  outline-offset: 0;
+  border-color: var(--highlight);
+}
+
+.nav-list {
+  padding: 0 8px 8px;
+}
+
+.nav-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.nav-row {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--ctl);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: none;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--t-fast) ease-out;
+}
+
+.nav-row .mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid transparent;
+  border-radius: 2px;
+}
+
+.nav-row .name {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.nav-row .area {
+  flex: none;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.nav-row.is-floor {
+  font-weight: 600;
+}
+
+.nav-row.is-room {
+  padding-left: 16px;
+}
+
+/* The floor shown: a neutral fill and an ink mark. */
+.nav-row[aria-current="true"] {
+  background: var(--tint-strong);
+  font-weight: 600;
+}
+
+.nav-row[aria-current="true"] .mark {
+  border-color: var(--text);
+  background: var(--text);
+}
+
+.nav-row[aria-current="true"] .area {
+  color: var(--text);
+}
+
+/* Pointed at, here or on the drawing: the hover tint. */
+.nav-row.is-hot {
+  background: var(--highlight-soft);
+}
+
+/* The open room: solid accent, like its tag. */
+.nav-row:not(.is-floor)[aria-current="true"] {
+  background: var(--highlight);
+  color: var(--accent-text);
+}
+
+.nav-row:not(.is-floor)[aria-current="true"] .mark {
+  border-color: var(--accent-text);
+  background: var(--accent-text);
+}
+
+.nav-row:not(.is-floor)[aria-current="true"] .area {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+@media (hover: hover) {
+  .nav-row:hover {
+    background: var(--highlight-soft);
+  }
+
+  .nav-row:not(.is-floor)[aria-current="true"]:hover {
+    background: var(--highlight-strong);
+  }
+}
+
+.nav-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 8px 8px;
+}
+
+.nav-empty p {
+  font-size: 14px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.nav-empty strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* The details panel. */
+.insp-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 12px 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.insp-heading {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.insp-kind {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.insp-title {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.insp-body {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 16px;
+}
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.crumb-part {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.crumb {
+  appearance: none;
+  min-height: 28px;
+  margin-left: -6px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: none;
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast) ease-out,
+    color var(--t-fast) ease-out;
+}
+
+.crumb-part + .crumb-part .crumb {
+  margin-left: 0;
+}
+
+@media (hover: hover) {
+  .crumb:hover {
+    background: var(--tint);
+    color: var(--text);
+  }
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+
+.stat {
+  display: grid;
+  gap: 2px;
+}
+
+.stat-val {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.stat-cap {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.sect h3 {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.kv {
+  display: grid;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.kv-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  column-gap: 12px;
+}
+
+.kv dt {
+  padding-top: 1px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.kv dd {
+  overflow-wrap: anywhere;
+}
+
+.contents {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item-btn {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 16px);
+  min-height: var(--ctl);
+  margin-left: -8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: none;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--t-fast) ease-out;
+}
+
+.item-btn .name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.item-btn .icon,
+.item-btn .count {
+  color: var(--muted);
+}
+
+/* The arrow shows on the row pointed at only; seventeen arrows read as noise. */
+.item-btn .icon {
+  opacity: 0;
+  transition: opacity var(--t-fast) ease-out;
+}
+
+.item-btn:hover .icon,
+.item-btn:focus-visible .icon {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .item-btn .icon {
+    opacity: 1;
+  }
+}
+
+.show-all {
+  margin-top: 4px;
+}
+
+.item-btn .count {
+  font-size: 13px;
+}
+
+@media (hover: hover) {
+  .item-btn:hover {
+    background: var(--tint);
+  }
+}
+
+.plain {
+  font-size: 15px;
+}
+
+.note {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Buttons. */
+.icon-btn {
+  appearance: none;
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--ctl);
+  height: var(--ctl);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-control);
+  background: none;
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast) ease-out,
+    color var(--t-fast) ease-out;
+}
+
+@media (hover: hover) {
+  .icon-btn:hover {
+    background: var(--tint-strong);
+  }
+}
+
+.text-btn {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--ctl);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface-solid);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast) ease-out,
+    border-color var(--t-fast) ease-out;
+}
+
+@media (hover: hover) {
+  .text-btn:hover:not(:disabled) {
+    border-color: var(--text);
+    background: var(--hot);
+  }
+}
+
+.text-btn:disabled {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* The dock: the view's controls, bottom centre, and the tool strip above them. */
+.dock {
+  position: absolute;
+  right: 0;
+  bottom: var(--edge);
+  left: 0;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  pointer-events: none;
+}
+
+.dock > * {
+  pointer-events: auto;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 4px;
+  border-radius: 9999px;
+}
+
+.bar .icon-btn,
+.bar .seg-btn {
+  border-radius: 9999px;
+}
+
+.bar-sep {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.seg {
+  display: flex;
+  padding: 2px;
+  border-radius: 9999px;
+  background: var(--tint);
+}
+
+.seg-btn {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(var(--ctl) - 4px);
+  padding: 0 12px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast) ease-out,
+    color var(--t-fast) ease-out;
+}
+
+.seg-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+@media (hover: hover) {
+  .seg-btn[aria-pressed="false"]:hover {
+    background: var(--tint-strong);
+    color: var(--text);
+  }
+}
+
+.tool-btn {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  width: auto;
+  min-width: var(--ctl);
+  padding: 0 10px;
+}
+
+.tool-btn .tool-label {
+  display: none;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tool-btn[aria-pressed="true"] {
+  padding: 0 12px 0 10px;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.tool-btn[aria-pressed="true"] .tool-label {
+  display: block;
+}
+
+@media (hover: hover) {
+  .tool-btn[aria-pressed="true"]:hover {
+    background: #000000;
+  }
+}
+
+/* Tooltips, for pointers only. */
+@media (hover: hover) {
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    padding: 4px 8px;
+    border-radius: var(--r-control);
+    background: var(--accent);
+    color: var(--accent-text);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%);
+    transition: opacity var(--t-fast) ease-out;
+  }
+
+  [data-tip]:hover::after,
+  [data-tip]:focus-visible::after {
+    opacity: 1;
+  }
+
+  [data-tip][aria-pressed="true"]::after {
+    content: none;
+  }
+}
+
+/* The tool strip. */
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  max-width: 100%;
+  padding: 8px 8px 8px 16px;
+  border-radius: var(--r-panel);
+  animation: rise var(--t-enter) ease-out;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.strip-text {
+  min-width: 160px;
+}
+
+.strip-status {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.strip-sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.strip-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cut {
+  display: flex;
+  max-width: 100%;
+  padding: 2px;
+  overflow-x: auto;
+  border-radius: var(--r-control);
+  background: var(--tint);
+  scrollbar-width: none;
+}
+
+.cut-btn {
+  appearance: none;
+  display: grid;
+  flex: none;
+  align-content: center;
+  min-height: var(--ctl);
+  padding: 2px 12px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast) ease-out,
+    color var(--t-fast) ease-out;
+}
+
+.cut-name {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.cut-h {
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.cut-btn[aria-checked="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.cut-btn[aria-checked="true"] .cut-h {
+  color: #d9dadf;
+}
+
+@media (hover: hover) {
+  .cut-btn[aria-checked="false"]:hover {
+    background: var(--tint-strong);
+  }
+}
+
+/* Tags on the drawing: a room with its area, an item, a measured distance. */
+.tag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface-solid);
+  box-shadow: 0 1px 2px rgba(26, 27, 31, 0.06);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tag-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--text);
+  border-radius: 2px;
+}
+
+.tag-meta {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.room-tags {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* Pinned above the middle of the room's floor. */
+.room-tag {
+  appearance: none;
+  position: absolute;
+  z-index: 1;
+  color: var(--text);
+  cursor: pointer;
+  pointer-events: auto;
+  /* Centred on its anchor, nudged up or down when another tag holds the spot. */
+  transform: translate(-50%, calc(-50% + var(--nudge, 0px)));
+  transition:
+    transform var(--t-fast) ease-out,
+    opacity var(--t-fast) ease-out,
+    background-color var(--t-fast) ease-out,
+    border-color var(--t-fast) ease-out;
+}
+
+/* With a room open, the other rooms' tags step back. */
+.room-tag.is-dim {
+  opacity: 0.55;
+}
+
+/* No mark at rest: a row of hollow squares reads as checkboxes. */
+.room-tag .tag-dot {
+  display: none;
+}
+
+/* Pointed at: stays white over the tinted floor, with an accent border and a filled mark. */
+.room-tag.is-hot {
+  z-index: 3;
+  border-color: var(--highlight);
+}
+
+.room-tag.is-hot .tag-dot,
+.room-tag.is-current .tag-dot {
+  display: block;
+}
+
+.room-tag.is-hot .tag-dot {
+  border-color: var(--highlight);
+  background: var(--highlight);
+}
+
+/* No clear spot for it: a dot on its anchor, which opens out (is-hot) while pointed at. */
+.room-tag.is-collapsed {
+  z-index: 0;
+  width: 8px;
+  height: 8px;
+  min-height: 0;
+  padding: 0;
+  border: 1.5px solid var(--surface-solid);
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 0.5px var(--border);
+}
+
+.room-tag.is-collapsed > * {
+  display: none;
+}
+
+/* A dot that would land on a tag or another dot: its room still lights it when pointed at. */
+.room-tag.is-hidden {
+  visibility: hidden;
+}
+
+/* A dot is small to see, not to hit. */
+.room-tag.is-collapsed::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+
+/* The open room: filled in the accent, like its row in Spaces. */
+.room-tag.is-current {
+  z-index: 2;
+  border-color: var(--highlight);
+  background: var(--highlight);
+  color: var(--accent-text);
+  cursor: default;
+}
+
+.room-tag.is-current .tag-dot {
+  border-color: var(--accent-text);
+  background: var(--accent-text);
+}
+
+.room-tag.is-current .tag-meta {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+@media (pointer: coarse) {
+  .room-tag {
+    min-height: 36px;
+    padding-inline: 12px;
+  }
+}
+
+.pointer-tag {
+  position: fixed;
+  z-index: 12;
+  transform: translateY(-100%);
+  pointer-events: none;
+}
+
+.pointer-tag.flip {
+  transform: translate(-100%, -100%);
+}
+
+.pointer-tag .tag-dot {
+  border-color: var(--highlight);
+  background: var(--highlight);
+}
+
+.measure-marks {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  pointer-events: none;
+}
+
+.measure-line {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.measure-line line {
+  stroke: var(--highlight);
+  stroke-width: 2;
+}
+
+.snap-ring {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 2px solid var(--highlight);
+  border-radius: 9999px;
+  background: var(--surface-solid);
+}
+
+.snap-ring.is-set {
+  background: var(--highlight);
+}
+
+.readout {
+  position: absolute;
+  padding: 4px 8px;
+  border-radius: var(--r-control);
+  background: var(--highlight);
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transform: translate(-50%, calc(-100% - 10px));
+}
+
+/* A message the browser's refusal earned, top centre. */
+.toast {
+  position: absolute;
+  top: var(--edge);
+  left: 50%;
+  z-index: 20;
+  max-width: min(440px, calc(100vw - 32px));
+  padding: 8px 12px;
+  border-radius: var(--r-control);
+  background: var(--accent);
+  box-shadow: var(--shadow);
+  color: var(--accent-text);
+  font-size: 14px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, -8px);
+  transition:
+    opacity var(--t-exit) ease-in,
+    transform var(--t-exit) ease-in,
+    visibility 0s linear var(--t-exit);
+}
+
+.toast.is-open {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition:
+    opacity var(--t-enter) ease-out,
+    transform var(--t-enter) ease-out,
+    visibility 0s;
+}
+
+/* The shortcut sheet. */
+.help {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+
+.help::backdrop {
+  background: rgba(26, 27, 31, 0.24);
+}
+
+.help[open] {
+  display: flex;
+  flex-direction: column;
+  animation: rise var(--t-enter) ease-out;
+}
+
+.help-head {
+  display: flex;
+  align-items: center;
+  padding: 12px 12px 12px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.help-head h2 {
+  flex: 1 1 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.help-body {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 16px 24px 24px;
+}
+
+.help-body h3 {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.keys {
+  display: grid;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.keys-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 16px;
+}
+
+.keys dt {
+  display: flex;
+  gap: 4px;
+}
+
+kbd {
+  display: block;
+  min-width: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-align: center;
+}
+
+.help-body p {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* Narrow screens and embeds: panels become sheets above the dock. */
+@media (max-width: 767px) {
+  :root {
+    --edge: 8px;
+  }
+
+  .title h1 {
+    font-size: 14px;
+  }
+
+  .panel {
+    top: auto;
+    right: var(--edge);
+    bottom: 76px;
+    left: var(--edge);
+    width: auto;
+    max-height: 46dvh;
+  }
+
+  .app:has(.strip) .panel {
+    bottom: 140px;
+    max-height: 38dvh;
+  }
+
+  /* One row: the floors scroll sideways rather than push the panel up. */
+  .strip {
+    flex-wrap: nowrap;
+    width: 100%;
+    padding-left: 8px;
+  }
+
+  .strip .cut {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .strip-text {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .strip-sub {
+    display: none;
+  }
+
+  .stats {
+    gap: 8px 20px;
+  }
+}
+
+@media (max-width: 479px) {
+  .bar-turn,
+  .bar-full {
+    display: none;
+  }
+
+  .bar-sep {
+    margin: 0 2px;
+  }
+
+  .seg-btn {
+    padding: 0 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app *,
+  .app *::before,
+  .app *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
+/* The loader: Pascal's three bars, outlined, filling one after another. */
+.loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.loader-mark {
+  width: 44px;
+  height: 44px;
+  overflow: visible;
+}
+
+.loader-bar {
+  fill: var(--ink);
+  fill-opacity: 0;
+  stroke: var(--ink);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  animation: loader-fill 1.8s ease-in-out infinite;
+}
+
+.loader-bar:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loader-bar:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes loader-fill {
+  0%,
+  15% {
+    fill-opacity: 0;
+  }
+  35%,
+  65% {
+    fill-opacity: 1;
+  }
+  85%,
+  100% {
+    fill-opacity: 0;
+  }
+}
+
+.loader-label {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
+.loader-track {
+  position: relative;
+  width: 120px;
+  height: 1px;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.loader-progress {
+  position: absolute;
+  inset: 0;
+  background: var(--ink);
+  transform-origin: left;
+  transition: transform 120ms linear;
+}
+
+.loader-progress.indeterminate {
+  width: 30%;
+  animation: loader-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes loader-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loader-bar {
+    animation: none;
+    fill-opacity: 0.15;
+  }
+
+  .loader-progress.indeterminate {
+    animation: none;
+    width: 100%;
+    opacity: 0.3;
+  }
+}
+
+.status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+
+.status h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.status-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 420px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.status-actions {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* Out of the flow, so a message never moves the buttons above it. */
+.status-error {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 48px));
+  margin: 10px 0 0;
+  transform: translateX(-50%);
+  color: #b42318;
+}

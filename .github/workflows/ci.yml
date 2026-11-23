@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        template: [listing, pascal, showcase]
+        template: [listing, pascal, showcase, minimal]
     defaults:
       run:
         working-directory: ${{ matrix.template }}
@@ -31,8 +31,9 @@ jobs:
         if: matrix.template == 'showcase'
       - run: npm run build
         if: matrix.template != 'listing'
+      # pascal's and showcase's own build check; listing and minimal have none.
       - run: npm run check
-        if: matrix.template != 'listing'
+        if: matrix.template == 'pascal' || matrix.template == 'showcase'
       # npm ls exits 1 for an empty filtered list; validate the JSON explicitly.
       - name: Verify editor and Next are absent
         if: matrix.template != 'listing'
@@ -47,11 +48,11 @@ jobs:
       # pascal and showcase render full 3D scenes; without a GPU that takes minutes, so their browser tests run
       # on the author's machine before a pull request and here only on a manual run.
       - run: npx playwright install --with-deps chromium
-        if: matrix.template == 'listing' || github.event_name == 'workflow_dispatch'
+        if: matrix.template != 'pascal' || github.event_name == 'workflow_dispatch'
       - run: npm run test:e2e
-        if: matrix.template == 'listing' || github.event_name == 'workflow_dispatch'
+        if: matrix.template != 'pascal' || github.event_name == 'workflow_dispatch'
       - run: npm run deploy:dry
-        if: matrix.template != 'listing'
+        if: matrix.template == 'pascal' || matrix.template == 'showcase'
         env:
           VIEWER_ID: viewer_dryrun
 
@@ -107,3 +108,4 @@ jobs:
       - uses: actions/checkout@v4
       - run: diff -r listing/src/pascal pascal/src/pascal
       - run: diff -r listing/src/pascal showcase/src/pascal
+      - run: diff -r listing/src/pascal minimal/src/pascal

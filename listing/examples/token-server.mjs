@@ -29,15 +29,22 @@ createServer(async (request, response) => {
 
   // Your login check goes here, e.g. read your session cookie and refuse with 401.
 
-  const minted = await fetch(
-    `${PASCAL_BASE_URL}/api/projects/${encodeURIComponent(project)}/viewer-grants`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${API_KEY}`, 'Content-Type': 'application/json' },
-      // externalSubject is an optional audit label for who this token was for.
-      body: JSON.stringify({ origins: [VIEWER_ORIGIN], ttlSeconds: 3600 }),
-    },
-  )
+  let minted
+  try {
+    minted = await fetch(
+      `${PASCAL_BASE_URL}/api/projects/${encodeURIComponent(project)}/viewer-grants`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${API_KEY}`, 'Content-Type': 'application/json' },
+        // externalSubject is an optional audit label for who this token was for.
+        body: JSON.stringify({ origins: [VIEWER_ORIGIN], ttlSeconds: 3600 }),
+      },
+    )
+  } catch {
+    // Pascal unreachable (offline, DNS): answer, and keep the server up for the next request.
+    response.writeHead(502, cors).end(JSON.stringify({ error: 'pascal_unreachable' }))
+    return
+  }
   const body = await minted.json().catch(() => ({}))
   if (!minted.ok) {
     response.writeHead(minted.status, cors).end(JSON.stringify({ error: body.error ?? 'mint_failed' }))
