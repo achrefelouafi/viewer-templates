@@ -48,9 +48,9 @@ jobs:
       # pascal and showcase render full 3D scenes; without a GPU that takes minutes, so their browser tests run
       # on the author's machine before a pull request and here only on a manual run.
       - run: npx playwright install --with-deps chromium
-        if: matrix.template != 'pascal' || github.event_name == 'workflow_dispatch'
+        if: (matrix.template != 'pascal' && matrix.template != 'showcase') || github.event_name == 'workflow_dispatch'
       - run: npm run test:e2e
-        if: matrix.template != 'pascal' || github.event_name == 'workflow_dispatch'
+        if: (matrix.template != 'pascal' && matrix.template != 'showcase') || github.event_name == 'workflow_dispatch'
       - run: npm run deploy:dry
         if: matrix.template == 'pascal' || matrix.template == 'showcase'
         env:
