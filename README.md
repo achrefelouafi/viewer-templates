@@ -28,6 +28,8 @@ Or deploy a copy straight away:
 
 Or host the build on Pascal at `https://<slug>.pascal-viewer.app`: see [Deploy to Pascal](listing/README.md#deploy-to-pascal).
 
+Pascal runs `showcase` and `listing` itself as official viewers that any project owner can pick in Pascal, without deploying anything: every merge to `main` deploys them to `showcase.pascal-viewer.app` and `listing.pascal-viewer.app`.
+
 Each template's `AGENTS.md` explains the read, what the 3D file contains and how to customise it, for you and for your coding agent.
 
 ## Rules every template follows

@@ -55,6 +55,51 @@ jobs:
         env:
           VIEWER_ID: viewer_dryrun
 
+  # Pascal's own Showcase and Listing viewers (showcase. and listing.pascal-viewer.app) follow main.
+  # Needs the secret PASCAL_API_KEY (an API key of Pascal's workspace) and the variables
+  # SHOWCASE_VIEWER_ID and LISTING_VIEWER_ID; a template without its variable is skipped.
+  deploy:
+    name: deploy ${{ matrix.template }}
+    needs: [template, shared-client]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-${{ matrix.template }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - template: showcase
+            viewer: SHOWCASE_VIEWER_ID
+          - template: listing
+            viewer: LISTING_VIEWER_ID
+    env:
+      VIEWER_ID: ${{ vars[matrix.viewer] }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.template }}
+    steps:
+      - if: env.VIEWER_ID == ''
+        working-directory: .
+        run: echo "::notice::${{ matrix.viewer }} is not set; ${{ matrix.template }} is not deployed."
+      - uses: actions/checkout@v4
+        if: env.VIEWER_ID != ''
+      - uses: actions/setup-node@v4
+        if: env.VIEWER_ID != ''
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.template }}/package-lock.json
+      - if: env.VIEWER_ID != ''
+        run: npm ci
+      - if: env.VIEWER_ID != ''
+        run: npm run build
+      - if: env.VIEWER_ID != ''
+        run: npx --yes @pascal-app/cli@1.1.6 viewer deploy dist --viewer "$VIEWER_ID"
+        env:
+          PASCAL_API_KEY: ${{ secrets.PASCAL_API_KEY }}
+
   shared-client:
     name: Identical Pascal API clients
     runs-on: ubuntu-latest
