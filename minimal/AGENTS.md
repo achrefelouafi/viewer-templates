@@ -54,7 +54,9 @@ The read API contract, what the baked GLB contains, access, deployment and the s
   the drawing zooms out (`creaseFadeZoom`), so fine repeating lines don't shimmer. Single-sided
   lines keep thin frames from drawing as two or three parallel strokes. The pass renders at
   least at `STYLE.inkResolution` (2) pixels to the CSS pixel: on a 1x monitor at twice its
-  resolution, scaled down by the smoothing pass, or its lines would be one coarse pixel.
+  resolution, scaled down by the smoothing pass, or its lines would be one coarse pixel. On a
+  software renderer (no GPU: SwiftShader, llvmpipe, as in the tests and CI) it stays at the
+  screen's own resolution, since four times the pixels would slow every frame.
   The edge test is per pixel, so it renders into `inkTarget` and a second shader
   smooths it onto the drawing with FXAA (the compact variant) along each line's direction;
   without it, roof hips and other diagonals come out stepped. The surfaces keep the canvas's

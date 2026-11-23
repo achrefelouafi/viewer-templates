@@ -211,6 +211,13 @@ void main() {
 }
 `
 
+/** Whether WebGL runs on the CPU (no GPU, or one the browser blocks): every pixel then costs. */
+function isSoftwareRenderer(context: WebGLRenderingContext | WebGL2RenderingContext) {
+  const info = context.getExtension('WEBGL_debug_renderer_info')
+  const name = String(context.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : context.RENDERER))
+  return /swiftshader|llvmpipe|softpipe|software/i.test(name)
+}
+
 /**
  * Takes over rendering: a normal and depth pass of the opaque scene into a target, the scene
  * itself, then the ink composited on top. Needs an orthographic camera.
@@ -220,6 +227,7 @@ export function InkPass() {
   const scene = useThree((state) => state.scene)
   const camera = useThree((state) => state.camera) as OrthographicCamera
   const size = useThree((state) => state.size)
+  const software = useMemo(() => isSoftwareRenderer(gl.getContext()), [gl])
 
   const resources = useMemo(() => {
     const target = new WebGLRenderTarget(1, 1, { depthTexture: new DepthTexture(1, 1) })
@@ -290,8 +298,9 @@ export function InkPass() {
     // The lines are found per pixel, so they render at least at `inkResolution` pixels to the
     // CSS pixel, whatever the screen: on a 1x monitor at twice its resolution, then scaled
     // down by the smoothing pass, as a 2x screen gets for free. Otherwise a 1x screen's lines
-    // are one coarse pixel, stepped on every diagonal and broken on thin frames.
-    const ratio = Math.max(gl.getPixelRatio(), STYLE.inkResolution)
+    // are one coarse pixel, stepped on every diagonal and broken on thin frames. Without a GPU
+    // (a software renderer) four times the pixels would slow every frame: the screen's own.
+    const ratio = software ? gl.getPixelRatio() : Math.max(gl.getPixelRatio(), STYLE.inkResolution)
     const width = Math.max(1, Math.floor(size.width * ratio))
     const height = Math.max(1, Math.floor(size.height * ratio))
     const screenRatio = gl.getPixelRatio()

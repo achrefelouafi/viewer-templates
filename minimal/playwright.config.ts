@@ -5,7 +5,10 @@ const port = 4179
 /** Serves the production build (`npm run build` first; `npm run test:e2e` does both). */
 export default defineConfig({
   testDir: 'tests',
-  timeout: 30_000,
+  // CI renders WebGL in software on two cores, several times slower than a laptop: shader
+  // compiles and screenshots of the drawing take seconds there, so tests and polls get longer.
+  timeout: process.env.CI ? 90_000 : 30_000,
+  expect: { timeout: process.env.CI ? 20_000 : 5_000 },
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',
   webServer: {
