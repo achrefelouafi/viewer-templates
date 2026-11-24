@@ -17,6 +17,7 @@
     "@pascal-app/viewer": "1.1.4",
     "@react-three/drei": "10.7.9",
     "@react-three/fiber": "9.8.2",
+    "home-assistant-js-websocket": "9.9.0",
     "lucide-react": "^1.69.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
@@ -49,6 +50,7 @@
     "typecheck": "node scripts/typecheck.mjs",
     "check": "node scripts/check-build.mjs",
     "test:e2e": "npm run build -- --mode runtime-test && playwright test",
+    "test:link": "playwright test -c playwright.link.config.ts",
     "deploy:dry": "npx @pascal-app/cli@1.1.4 viewer deploy dist --viewer $VIEWER_ID --dry-run"
   }
 }

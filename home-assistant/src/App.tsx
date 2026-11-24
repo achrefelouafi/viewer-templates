@@ -3,11 +3,12 @@ import { PASCAL_BASE_URL, projectIdFromLocation } from './config'
 import { hasHandoffCallback } from './pascal/handoff'
 import { projectSceneRuntime } from './runtime/project-scene'
 import { useProjectScene } from './useProjectScene'
-import { ProjectViewer } from './viewer/ProjectViewer'
 import { ErrorScreen, LoadingScreen, NeedsAccessScreen, NoFileScreen, RefusedScreen, Status } from './viewer/screens'
 
 /** The Home Assistant effects lab, at /lab (or ?lab where the host has no rewrites). Loaded on demand. */
 const Lab = lazy(() => import('./lab/Lab'))
+/** A project as the lab shows its home, with the visitor's own Home Assistant. */
+const HomeProjectViewer = lazy(() => import('./home/HomeProjectViewer').then((m) => ({ default: m.HomeProjectViewer })))
 const isLabRoute = () => /\/lab\/?$/.test(window.location.pathname) || new URLSearchParams(window.location.search).has('lab')
 
 export function App() {
@@ -31,10 +32,11 @@ function Project({ projectId }: { projectId: string }) {
     case 'no-file': return <NoFileScreen scene={state.scene} onRetry={reload} />
     case 'live':
     case 'baked': {
-      // A late plugin bumps runtimeRevision without remounting; the viewer rebuilds what it draws.
-      const glbUrl = state.kind === 'baked' ? state.url : null
-      return <ProjectViewer key={`${state.scene.revision.modelId}:${state.scene.revision.version}:${glbUrl}`}
-        scene={state.scene} glbUrl={glbUrl} runtimeRevision={state.runtimeRevision} />
+      // As the lab: the graph rebuilt live whatever the bake (the wireframe restyles live meshes).
+      // A late plugin bumps runtimeRevision without remounting; the graph is set again to draw it.
+      return <Suspense fallback={<LoadingScreen />}>
+        <HomeProjectViewer key={`${state.scene.revision.modelId}:${state.scene.revision.version}`} scene={state.scene} runtimeRevision={state.runtimeRevision} />
+      </Suspense>
     }
   }
 }

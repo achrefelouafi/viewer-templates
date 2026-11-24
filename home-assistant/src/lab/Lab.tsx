@@ -1,12 +1,11 @@
 import { initSpatialGridSync, sceneRegistry, useScene } from '@pascal-app/core'
 import { InteractiveSystem, SceneEnvironment, useViewer, Viewer } from '@pascal-app/viewer'
 import { SceneLoader, type ViewerSource } from '@pascal-app/viewer/ui'
-import { OrbitControls } from '@react-three/drei'
-import { useFrame, useThree } from '@react-three/fiber'
+import { useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
-import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import { type FieldKind, type HomeDevice } from '../home/entities'
+import { CameraRig } from '../home/CameraRig'
+import type { FieldKind } from '../home/entities'
 import { livePosition } from '../home/effects/common'
 import { HomeEffects } from '../home/HomeEffects'
 import { HomePanel } from '../home/HomePanel'
@@ -121,7 +120,7 @@ function LabStage({ onSceneReady }: { onSceneReady: (ready: boolean) => void }) 
       <Viewer daylight={false} defaultRender={{ shading: 'rendered' }} onSceneReadyChange={onSceneReady} renderContext="viewer" sceneReadyKey="lab" selectionManager="custom" useBvh={false}>
         {/* as on the project viewer, so the lab's sky and grounds match it */}
         <SceneEnvironment />
-        <CameraRig device={device} group={group} />
+        <CameraRig device={device} group={group} home={HOME_VIEW} />
         {import.meta.env.DEV && <DevHandle />}
         {LAB_DEVICES.map((d) => entities[d.entityId] && <LabBody key={d.entityId} model={d.model} e={entities[d.entityId]!} position={d.anchor.position} rotationY={d.anchor.rotationY} />)}
         {LAB_SCENERY.map((s, i) => (
@@ -152,60 +151,4 @@ function DevHandle() {
     ;(window as unknown as { __lab: unknown }).__lab = state
   }, [state])
   return null
-}
-
-/** Orbit controls that fly to the chosen device (looking at it from in front) and back out again,
-    or close in on a group of pins until they separate. */
-function CameraRig({ device, group }: { device: HomeDevice | null; group: THREE.Vector3[] | null }) {
-  const controls = useRef<OrbitControlsImpl>(null)
-  const camera = useThree((s) => s.camera)
-  const flying = useRef(0)
-  const wantPos = useMemo(() => new THREE.Vector3(), [])
-  const wantTgt = useMemo(() => new THREE.Vector3(), [])
-
-  useEffect(() => {
-    if (device) {
-      const [x, y, z] = device.anchor.position
-      const a = device.anchor.rotationY
-      // stand in front of it, a little to the side and above, further back for ceiling fittings
-      const dist = device.anchor.mount === 'ceiling' ? 4.2 : device.anchor.mount === 'wall' ? 3 : 3.4
-      const side = a + 0.45
-      wantTgt.set(x, device.anchor.mount === 'ceiling' ? y - 0.9 : y - 0.2, z)
-      wantPos.set(x + Math.cos(side) * dist, Math.max(y, 1.2) + 1.1, z - Math.sin(side) * dist)
-    } else {
-      wantPos.copy(HOME_VIEW.position)
-      wantTgt.copy(HOME_VIEW.target)
-    }
-    flying.current = 1.4
-  }, [device, wantPos, wantTgt])
-
-  useEffect(() => {
-    const c = controls.current
-    if (!group?.length || !c) return
-    // keep looking from the same side, just closer: near enough that pins a few
-    // centimetres apart sit a pin's width apart on screen
-    const centre = group.reduce((s, p) => s.add(p), new THREE.Vector3()).divideScalar(group.length)
-    const spread = Math.max(...group.map((p) => p.distanceTo(centre)))
-    const dir = camera.position.clone().sub(c.target).normalize()
-    wantTgt.copy(centre)
-    wantPos.copy(centre).addScaledVector(dir, THREE.MathUtils.clamp(spread * 5 + 1.2, 1.4, 9))
-    flying.current = 1.4
-  }, [group, camera, wantPos, wantTgt])
-
-  useEffect(() => {
-    camera.position.copy(HOME_VIEW.position)
-    controls.current?.target.copy(HOME_VIEW.target)
-  }, [camera])
-
-  useFrame((_, dt) => {
-    const c = controls.current
-    if (!c || flying.current <= 0) return
-    flying.current -= dt
-    const k = 1 - Math.exp(-dt * 3.5)
-    camera.position.lerp(wantPos, k)
-    c.target.lerp(wantTgt, k)
-    c.update()
-  })
-
-  return <OrbitControls ref={controls} makeDefault maxPolarAngle={Math.PI / 2.05} minDistance={1} maxDistance={40} onStart={() => (flying.current = 0)} />
 }

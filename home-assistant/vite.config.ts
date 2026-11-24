@@ -84,7 +84,8 @@ function contentSecurityPolicy(env: Record<string, string>): Plugin {
     // Emscripten Basis bindings construct functions; decoders also compile Wasm.
     "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'",
     "worker-src 'self' blob:",
-    `connect-src 'self' data: blob: ${apiOrigin} https://*.supabase.co`,
+    // https: and wss: for the visitor's own Home Assistant, which can be at any address
+    `connect-src 'self' data: blob: ${apiOrigin} https://*.supabase.co https: wss:`,
     "img-src 'self' data: blob: https:",
     "media-src 'self' blob:",
     "font-src 'self' data:",
