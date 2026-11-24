@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { classify } from '../../src/home/link/classify'
-import { entityInfos, linkHome } from '../../src/home/link/match'
+import { entityInfos, linkHome, pairAreas } from '../../src/home/link/match'
 import { formatReport } from '../../src/home/link/report'
 import { readThings } from '../../src/home/link/scene'
 import { roomLikeness } from '../../src/home/link/words'
@@ -71,4 +71,22 @@ test('room names pair across words and languages', () => {
   expect(roomLikeness('Chambre 2', 'Bedroom 2')).toBeGreaterThan(0.8)
   expect(roomLikeness('Bedroom 1', 'Bedroom 2')).toBe(0)
   expect(roomLikeness('Kitchen', 'Garage')).toBe(0)
+  // "room" alone tells no room apart
+  expect(roomLikeness('Room', 'Living Room')).toBe(0)
+  expect(roomLikeness('Kitchen', 'Kitchen / Office')).toBeGreaterThan(0.7)
+})
+
+test('an area as alike two rooms is asked, not guessed', () => {
+  const rooms = [{ id: 'z1', name: 'Bedroom 1' }, { id: 'z2', name: 'Bedroom 2' }, { id: 'z3', name: 'Kitchen / Office' }]
+  const [bedroom, kitchen, guest, garage] = pairAreas(['Bedroom', 'Kitchen', 'Guest room', 'Garage'], rooms)
+  expect(bedroom).toMatchObject({ room: null, how: 'unsure' })
+  expect(bedroom!.choices.map((r) => r.id)).toEqual(['z1', 'z2'])
+  expect(kitchen).toMatchObject({ room: { id: 'z3' }, how: 'name' })
+  // a guest room is a bedroom too: which one?
+  expect(guest).toMatchObject({ room: null, how: 'unsure' })
+  expect(garage).toMatchObject({ room: null, how: 'none' })
+  // once the visitor says which, it is that room, and the other bedroom stays free
+  const [answered, second] = pairAreas(['Bedroom', 'Bedroom 2'], rooms, { Bedroom: 'z1' })
+  expect(answered).toMatchObject({ room: { id: 'z1' }, how: 'you' })
+  expect(second).toMatchObject({ room: { id: 'z2' }, how: 'name' })
 })

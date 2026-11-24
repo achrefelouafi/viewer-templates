@@ -43,6 +43,9 @@ const ROOMS: Record<string, string[]> = {
 }
 const ROOM_OF = new Map(Object.entries(ROOMS).flatMap(([canon, names]) => names.map((n) => [n, canon] as const)))
 
+/** Words every kind of room can carry. */
+const GENERIC_ROOM = new Set(['room', 'rooms', 'piece', 'area', 'zone', 'space', 'espace'])
+
 /** "Chambre 2" → { canon: "bedroom", number: "2" }; a name it does not know keeps its own words. */
 export function roomKey(name: string) {
   const all = words(name)
@@ -60,8 +63,9 @@ export function roomLikeness(a: string, b: string): number {
   const kb = roomKey(b)
   if (ka.number && kb.number && ka.number !== kb.number) return 0
   if (ka.canon && ka.canon === kb.canon) return ka.number === kb.number ? 0.9 : 0.6
-  const wa = new Set(telling(a))
-  const wb = new Set(telling(b))
+  // "room" says nothing about which room: "Room" is not the "Living Room"
+  const wa = new Set(telling(a).filter((w) => !GENERIC_ROOM.has(w)))
+  const wb = new Set(telling(b).filter((w) => !GENERIC_ROOM.has(w)))
   const shared = [...wa].filter((w) => wb.has(w)).length
   // one name inside the other: "Kitchen" is the room drawn as "Kitchen / Office"
   if (shared && shared === Math.min(wa.size, wb.size)) return 0.75

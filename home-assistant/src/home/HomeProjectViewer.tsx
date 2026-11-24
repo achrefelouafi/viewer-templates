@@ -1,6 +1,6 @@
 import { initSpatialGridSync, sceneRegistry, useScene } from '@pascal-app/core'
 import { InteractiveSystem, SceneEnvironment, useViewer, Viewer } from '@pascal-app/viewer'
-import { SceneLoader, type ViewerSource } from '@pascal-app/viewer/ui'
+import { SceneLoader, useViewerFloorDisplay, ViewerSelectionManager, type ViewerSource } from '@pascal-app/viewer/ui'
 import { useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
@@ -10,6 +10,7 @@ import { CameraRig, type CameraView } from './CameraRig'
 import type { Area, FieldKind } from './entities'
 import { livePosition } from './effects/common'
 import { HomeOverlay, HomeScene, useHomeLayer } from './HomeLayer'
+import { LevelPicker } from './LevelPicker'
 import { ThemeSwitch } from './sketch/ThemeSwitch'
 
 /* A Pascal project as the effects lab shows its home (src/lab/Lab.tsx), with the visitor's own
@@ -85,6 +86,13 @@ function HomeStage({ projectId, title, sceneReady, onSceneReady, sceneKey }: {
   const [selected, setSelected] = useState<string | null>(null)
   const [layer, setLayer] = useState<FieldKind | null>('temperature')
   const view = useMemo(() => viewOf(home.areas), [home.areas])
+  // a floor picked from the list reads as on the default viewer: the floors above step aside
+  useViewerFloorDisplay()
+  // an item picked on the plan opens its links where a device's controls would: one card at a time
+  const picked = useViewer((s) => s.selection.selectedIds[0])
+  useEffect(() => {
+    if (picked) setSelected(null)
+  }, [picked])
 
   const press = useCallback((id: string) => setSelected((s) => (s === id ? s : id)), [])
   const select = useCallback((id: string | null) => {
@@ -112,13 +120,18 @@ function HomeStage({ projectId, title, sceneReady, onSceneReady, sceneKey }: {
         <CameraRig device={device} group={group} home={view} />
         {import.meta.env.DEV && <DevHandle />}
         <InteractiveSystem />
+        {/* Pascal's own picking, as on the default viewer: a click selects a room, then an item in it */}
+        <ViewerSelectionManager />
         {/* the guided tour's wireframe over everything but what Home Assistant drives, and their effects */}
         <HomeScene home={home} layer={layer} onPress={press} pins={pins} selected={selected} />
       </Viewer>
 
       <HomeOverlay home={home} layer={layer} onGroup={zoomTo} onLayer={setLayer} onSelect={select} pins={pins} selected={selected} title={title} />
 
-      {/* the only control, as in the lab: light or dark */}
+      {/* the floors, as on the default viewer: the whole building or one floor alone */}
+      <LevelPicker className="absolute right-4 bottom-4 z-30 sm:bottom-6" source={source} />
+
+      {/* light or dark, as in the lab */}
       <ThemeSwitch className="absolute bottom-4 left-1/2 z-30 -translate-x-1/2 sm:bottom-6" />
     </>
   )

@@ -20,3 +20,24 @@
 }
 html, body, #root { height: 100%; margin: 0; }
 body { @apply bg-background text-foreground font-sans; text-wrap: pretty; }
+
+/* From the tour viewer (viewer-templates-tour, pascal/src/styles.css): the slim scrollbar of its panels. */
+/* Slim scrollbar for glass panels: a 4px rounded graphite (or light, in dark) thumb on no track. */
+.ui-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.ui-scroll::-webkit-scrollbar-track { background: transparent; margin-block: 6px; }
+.ui-scroll::-webkit-scrollbar-button { display: none; }
+.ui-scroll::-webkit-scrollbar-corner { background: transparent; }
+.ui-scroll::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+.ui-scroll:hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--foreground) 26%, transparent); }
+.ui-scroll::-webkit-scrollbar-thumb:active { background-color: color-mix(in srgb, var(--foreground) 38%, transparent); }
+@supports not selector(::-webkit-scrollbar) {
+  .ui-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
+  }
+}

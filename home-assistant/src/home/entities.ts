@@ -297,7 +297,9 @@ export function statusOf(e: HassEntity): string {
     case 'light': {
       if (!isOn(e)) return 'Off'
       const pct = Math.round(lightLevel(e) * 100)
-      return e.attributes.color_mode === 'rgb' ? `${pct}% · colour` : `${pct}% · ${e.attributes.color_temp_kelvin} K`
+      // a colour (rgb, rgbw, hs, xy…) or a white light that reports its temperature, or just its level
+      if (e.attributes.color_temp_kelvin) return `${pct}% · ${e.attributes.color_temp_kelvin} K`
+      return e.attributes.color_mode && e.attributes.color_mode !== 'brightness' && e.attributes.color_mode !== 'onoff' ? `${pct}% · colour` : `${pct}%`
     }
     case 'climate': {
       if (e.state === 'off') return 'Off'

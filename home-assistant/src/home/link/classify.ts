@@ -10,6 +10,8 @@ export type DeviceKind =
   | 'camera' | 'smoke-detector' | 'sensor' | 'siren' | 'keypad' | 'doorbell' | 'lock'
   | 'vacuum' | 'mower' | 'water-heater' | 'valve' | 'router' | 'plug'
   | 'washer' | 'dryer' | 'dishwasher' | 'fridge' | 'oven' | 'microwave' | 'coffee-machine'
+  /** An item the visitor linked by hand that the word table reads as nothing. */
+  | 'other'
 
 /** How a thing hangs: it decides which way it faces. */
 export type Mount = 'ceiling' | 'wall' | 'floor' | 'table'
@@ -25,7 +27,7 @@ const TABLE: [DeviceKind, RegExp][] = [
   ['humidifier', /\b(de ?humidifiers?|humidifiers?|de ?humidificateurs?|humidificateurs?)\b/],
   ['ac', /\b(air ?con\w*|ac( units?)?|split (units?|systems?|ac)|mini ?splits?|hvac|clim|climatiseurs?|climatisation|heat pumps?|pompes? a chaleur)\b/],
   ['heater', /\b(\w*heaters?|radiators?|radiateurs?|chauffages?|convectors?|convecteurs?|wood ?burners?|poeles?|fireplaces?|cheminees?)\b/],
-  ['thermostat', /\b(thermostats?)\b/],
+  ['thermostat', /\b(thermostats?|ecobee|tado)\b/],
   ['fan', /\b(fans?|ventilateurs?|ventilos?)\b/],
   ['tv', /\b(tvs?|televisions?|televiseurs?|teles?|tele)\b/],
   ['speaker', /\b(speakers?|enceintes?|soundbars?|sound bars?|barres? de son|sonos|homepods?|echo|subwoofers?|hifi|hi fi|stereo|smart displays?|nest hub)\b/],

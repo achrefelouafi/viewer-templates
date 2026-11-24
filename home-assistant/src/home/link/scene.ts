@@ -114,6 +114,8 @@ export function graphPlacement(nodes: GraphNodes, id: string): Placement {
 export type ReadOptions = {
   /** The drawn position and turn of a node on its level's plan, where the caller has them. */
   place?: (id: string) => Placement | null
+  /** Items to read even where the word table finds no device in them: ones linked by hand. */
+  include?: ReadonlySet<string>
 }
 
 /** Every thing in the graph Home Assistant could drive, and the rooms of every level. */
@@ -166,7 +168,8 @@ export function readThings(nodes: GraphNodes, options: ReadOptions = {}): { thin
   const found: Thing[] = []
   for (const node of all) {
     const parent = node.parentId ? nodes[node.parentId] : undefined
-    const kind = classify(node, parent?.type === 'item')
+    const kind = classify(node, parent?.type === 'item') ??
+      (options.include?.has(node.id) && node.type === 'item' ? { kind: 'other' as const, confidence: 'likely' as const, why: 'linked by hand' } : null)
     if (!kind) continue
     const levelId = levelOf(nodes, node.id)
     const { position, yaw } = placeOf(node.id)

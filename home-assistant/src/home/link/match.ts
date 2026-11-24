@@ -13,7 +13,7 @@ import { normalize, roomLikeness, telling, words } from './words'
 export type EntityInfo = { entity_id: string; name: string; area?: string; device_class?: string }
 
 /** What an entity is on the plan: a thing of these kinds, something of its room, or of the home. */
-type Wants = { place: 'thing'; kinds: DeviceKind[]; also?: DeviceKind[] } | { place: 'room' } | { place: 'home' }
+type Wants = { place: 'thing'; kinds: DeviceKind[]; also?: DeviceKind[]; named?: boolean } | { place: 'room' } | { place: 'home' }
 
 const ROOM_SENSORS = new Set(['temperature', 'humidity', 'carbon_dioxide', 'co2', 'pm25', 'pm10', 'volatile_organic_compounds', 'illuminance', 'sound_pressure', 'pressure', 'aqi', 'nitrogen_dioxide'])
 
@@ -24,7 +24,7 @@ export function wantsOf(e: EntityInfo): Wants {
   const pick = (kinds: DeviceKind[], also: DeviceKind[] = []): Wants => {
     // the name picks among what the domain allows: "Lounge floor fan" is a fan, not a ceiling fan
     const first = named && [...kinds, ...also].includes(named) ? [named] : []
-    return { place: 'thing', kinds: [...first, ...kinds.filter((k) => k !== named)], also: also.filter((k) => k !== named) }
+    return { place: 'thing', kinds: [...first, ...kinds.filter((k) => k !== named)], also: also.filter((k) => k !== named), named: first.length > 0 }
   }
   switch (domainOf(e.entity_id)) {
     case 'light': return pick(['light'], ['ceiling-fan', 'fan'])
@@ -35,7 +35,8 @@ export function wantsOf(e: EntityInfo): Wants {
       return dc === 'tv' ? pick(['tv']) : dc === 'speaker' || dc === 'receiver' ? pick(['speaker'], ['tv']) : pick(['tv', 'speaker'])
     case 'assist_satellite': return pick(['speaker'])
     case 'cover':
-      if (dc === 'garage') return pick(['garage-door'])
+      // a garage door is often drawn as a plain door in the garage
+      if (dc === 'garage') return pick(['garage-door'], ['door'])
       if (dc === 'gate') return pick(['gate'])
       if (dc === 'door') return pick(['door', 'garage-door'])
       if (dc === 'window') return pick(['window'])
@@ -76,9 +77,10 @@ export type Candidate = { thingId: string; score: number; why: string[] }
  * sure: the only one of its kind left in its room. likely: the best by its words, clearly.
  * ask: several fit equally; a person picks. room: it belongs to its room, not a thing (a
  * thermometer). home: it belongs to no place (a person, the weather). missing: nothing in the plan
- * can be it (a lamp nobody drew).
+ * can be it (a lamp nobody drew). unplaced: in no room Home Assistant knows of, and more than one
+ * thing in the house could be it; it waits for an area rather than ask across the whole house.
  */
-export type LinkStatus = 'sure' | 'likely' | 'ask' | 'room' | 'home' | 'missing'
+export type LinkStatus = 'sure' | 'likely' | 'ask' | 'room' | 'home' | 'missing' | 'unplaced'
 
 export type Link = {
   entityId: string
@@ -92,7 +94,12 @@ export type Link = {
   why: string
 }
 
-export type AreaPairing = { area: string; room: Room | null; likeness: number }
+/**
+ * How a Home Assistant area found its Pascal room. name: by its name. you: the visitor said.
+ * unsure: as alike two or more rooms ("Bedroom" against "Bedroom 1" and "Bedroom 2"), so not
+ * guessed: `choices` are those rooms. none: like no room ("Guest room"); `choices` is every room.
+ */
+export type AreaPairing = { area: string; room: Room | null; likeness: number; how: 'name' | 'you' | 'unsure' | 'none'; choices: Room[] }
 
 export type LinkReport = {
   areas: AreaPairing[]
@@ -101,18 +108,45 @@ export type LinkReport = {
   unused: string[]
 }
 
-/** Each Home Assistant area with the Pascal room of the most alike name (one room per area). */
-export function pairAreas(areas: string[], rooms: Room[]): AreaPairing[] {
-  const pairs = areas.flatMap((area) => rooms.map((room) => ({ area, room, likeness: roomLikeness(area, room.name) })))
-  pairs.sort((a, b) => b.likeness - a.likeness)
+/** How much more alike the best room must be than the next, for an area to take it unasked. */
+const AREA_LEAD = 0.05
+
+/**
+ * Each Home Assistant area with its Pascal room: the visitor's answers first, then by name, the
+ * most alike pairs first, one room per area. An area as alike two free rooms is left unpaired.
+ * @param chosen the visitor's answers: area name → room id, or null for "none of these"
+ */
+export function pairAreas(areas: string[], rooms: Room[], chosen: Record<string, string | null> = {}): AreaPairing[] {
   const taken = new Set<string>()
   const done = new Map<string, AreaPairing>()
-  for (const p of pairs) {
-    if (p.likeness < 0.55 || done.has(p.area) || taken.has(p.room.id)) continue
-    done.set(p.area, p)
-    taken.add(p.room.id)
+  for (const area of areas) {
+    if (!(area in chosen)) continue
+    const room = rooms.find((r) => r.id === chosen[area]) ?? null
+    done.set(area, { area, room, likeness: room ? 1 : 0, how: 'you', choices: [] })
+    if (room) taken.add(room.id)
   }
-  return areas.map((area) => done.get(area) ?? { area, room: null, likeness: 0 })
+  const ranked = (area: string, among: Room[]) =>
+    among.map((room) => ({ room, likeness: roomLikeness(area, room.name) })).filter((r) => r.likeness >= 0.55).sort((a, b) => b.likeness - a.likeness)
+  // the clearest pair first; each one taken can settle the next
+  for (let settled = true; settled; ) {
+    settled = false
+    const best = areas
+      .filter((area) => !done.has(area))
+      .map((area) => ({ area, ranked: ranked(area, rooms.filter((r) => !taken.has(r.id))) }))
+      .filter(({ ranked: r }) => r[0] && (!r[1] || r[0].likeness - r[1].likeness >= AREA_LEAD))
+      .sort((a, b) => b.ranked[0]!.likeness - a.ranked[0]!.likeness)[0]
+    if (!best) break
+    const { room, likeness } = best.ranked[0]!
+    done.set(best.area, { area: best.area, room, likeness, how: 'name', choices: [] })
+    taken.add(room.id)
+    settled = true
+  }
+  return areas.map((area) => {
+    const pairing = done.get(area)
+    if (pairing) return pairing
+    const alike = ranked(area, rooms).map((r) => r.room)
+    return alike.length ? { area, room: null, likeness: 0, how: 'unsure', choices: alike } : { area, room: null, likeness: 0, how: 'none', choices: rooms }
+  })
 }
 
 /** Names of a way in from outside. */
@@ -121,11 +155,16 @@ const OUTSIDE_WORDS = /\b(front|back|main|entry|entrance|exterior|outside|garden
 /** How far ahead the best candidate must be, on its words, to be taken without asking. */
 const CLEAR_LEAD = 0.5
 
-export function linkHome(things: Thing[], entities: EntityInfo[], rooms: Room[]): LinkReport {
-  const areas = pairAreas([...new Set(entities.flatMap((e) => (e.area ? [e.area] : [])))], rooms)
+/**
+ * @param chosenAreas the visitor's answers to which room an area is (see `pairAreas`)
+ */
+export function linkHome(things: Thing[], entities: EntityInfo[], rooms: Room[], chosenAreas: Record<string, string | null> = {}): LinkReport {
+  const areas = pairAreas([...new Set(entities.flatMap((e) => (e.area ? [e.area] : [])))], rooms, chosenAreas)
   const roomOfArea = new Map(areas.map((a) => [a.area, a.room]))
+  const pairingOf = new Map(areas.map((a) => [a.area, a]))
   const links = new Map<string, Link>()
-  const open: { e: EntityInfo; roomId?: string; candidates: Candidate[] }[] = []
+  // waiting: its area could be several rooms, so nothing is linked until the visitor says which
+  const open: { e: EntityInfo; roomId?: string; candidates: Candidate[]; waiting?: string }[] = []
 
   for (const e of entities) {
     const room = e.area ? roomOfArea.get(e.area) : undefined
@@ -137,7 +176,15 @@ export function linkHome(things: Thing[], entities: EntityInfo[], rooms: Room[])
     }
     const nameWords = telling(e.name).filter((w) => !(room && words(room.name).includes(w)) && !(e.area && words(e.area).includes(w)))
     // the things of a kind it can drive, in its room (an area with no room keeps every room open)
-    const fit = things.filter((t) => (wants.kinds.includes(t.kind) || wants.also?.includes(t.kind)) && (!room || t.rooms.some((r) => r.id === room.id)))
+    // an area that could be several rooms looks in those rooms only; an area like no room is
+    // outside (a garden), so it looks at what is in no room
+    const pairing = e.area ? pairingOf.get(e.area) : undefined
+    const inPlace = (t: Thing) =>
+      room ? t.rooms.some((r) => r.id === room.id)
+        : pairing?.how === 'unsure' ? t.rooms.some((r) => pairing.choices.some((c) => c.id === r.id))
+        : pairing?.how === 'none' ? !t.rooms.length
+        : true
+    const fit = things.filter((t) => (wants.kinds.includes(t.kind) || wants.also?.includes(t.kind)) && inPlace(t))
     const ownWords = new Map(fit.map((t) => [t.id, new Set(telling(t.label))]))
     // a word on several of them tells less: "lamp" on two lamps counts half on each
     const spread = (w: string) => fit.filter((t) => ownWords.get(t.id)!.has(w) || t.near.includes(w)).length || 1
@@ -145,7 +192,8 @@ export function linkHome(things: Thing[], entities: EntityInfo[], rooms: Room[])
     for (const t of fit) {
       const rank = wants.kinds.indexOf(t.kind)
       const why: string[] = []
-      let score = rank === 0 ? 1 : rank > 0 ? 0.8 : 0.4
+      // its name says what it is ("Ecobee" is a thermostat): the domain's other kinds count for less
+      let score = rank === 0 ? 1 : rank > 0 ? (wants.named ? 0.4 : 0.8) : 0.3
       why.push(rank === 0 ? `a ${t.kind}` : `a ${t.kind}, which it can be`)
       if (t.confidence === 'likely') score -= 0.1
       if (room) {
@@ -171,7 +219,7 @@ export function linkHome(things: Thing[], entities: EntityInfo[], rooms: Room[])
       candidates.push({ thingId: t.id, score: Math.round(score * 100) / 100, why })
     }
     candidates.sort((a, b) => b.score - a.score)
-    open.push({ e, ...(room ? { roomId: room.id } : {}), candidates })
+    open.push({ e, ...(room ? { roomId: room.id } : {}), candidates, ...(pairing?.how === 'unsure' ? { waiting: pairing.area } : {}) })
   }
 
   // A thing takes one entity per domain, and per class for sensors: a ceiling fan its fan and its
@@ -188,7 +236,7 @@ export function linkHome(things: Thing[], entities: EntityInfo[], rooms: Room[])
     held.add(slot(c.thingId, o.e.entity_id))
   }
   const free = (o: (typeof open)[number]) => o.candidates.filter((c) => !held.has(slot(c.thingId, o.e.entity_id)))
-  const pending = () => open.filter((o) => !links.has(o.e.entity_id))
+  const pending = () => open.filter((o) => !links.has(o.e.entity_id) && !o.waiting)
 
   // sure, again and again: an entity with one thing left that no other entity can take; each one
   // settled can leave the next with one
@@ -198,7 +246,7 @@ export function linkHome(things: Thing[], entities: EntityInfo[], rooms: Room[])
       const left = free(o)
       if (left.length !== 1 || !o.roomId) continue
       const c = left[0]!
-      const rivals = pending().filter((p) => p !== o && free(p).some((d) => slot(d.thingId, p.e.entity_id) === slot(c.thingId, o.e.entity_id)))
+      const rivals = pending().filter((p) => p !== o && (!!p.roomId || !o.roomId) && free(p).some((d) => slot(d.thingId, p.e.entity_id) === slot(c.thingId, o.e.entity_id)))
       if (rivals.length) continue
       settle(o, 'sure', c, 'the only one of its kind in its room')
       changed = true
@@ -211,7 +259,7 @@ export function linkHome(things: Thing[], entities: EntityInfo[], rooms: Room[])
     for (const o of pending()) {
       const [best, next] = free(o)
       if (!best || (next && best.score - next.score < CLEAR_LEAD)) continue
-      const rivals = pending().filter((p) => p !== o && free(p).some((d) => slot(d.thingId, p.e.entity_id) === slot(best.thingId, o.e.entity_id) && d.score >= best.score))
+      const rivals = pending().filter((p) => p !== o && (!!p.roomId || !o.roomId) && free(p).some((d) => slot(d.thingId, p.e.entity_id) === slot(best.thingId, o.e.entity_id) && d.score >= best.score))
       if (rivals.length) continue
       settle(o, 'likely', best, next ? `clearly ahead: ${best.why.join(', ')}` :'the only one of its kind it could be')
       changed = true
@@ -225,10 +273,17 @@ export function linkHome(things: Thing[], entities: EntityInfo[], rooms: Room[])
       links.set(o.e.entity_id, { entityId: o.e.entity_id, status: 'room', ...(o.roomId ? { roomId: o.roomId } : {}), candidates: [], why: 'a sensor not drawn in the plan: reads its room' })
       continue
     }
+    // with no room, "which one?" would range over the whole house: it waits for a room instead
+    const status: LinkStatus = !left.length ? 'missing' : o.roomId ? 'ask' : 'unplaced'
     links.set(o.e.entity_id, {
-      entityId: o.e.entity_id, status: left.length ? 'ask' : 'missing', ...(o.roomId ? { roomId: o.roomId } : {}), candidates: left,
-      why: left.length ? `${left.length} could be it` : o.candidates.length ? 'what it could be is taken' : 'nothing of its kind in its room',
+      entityId: o.e.entity_id, status, ...(o.roomId ? { roomId: o.roomId } : {}), candidates: left,
+      why: status === 'unplaced' ? 'in no room Home Assistant knows of: give it an area'
+        : left.length ? `${left.length} could be it` : o.candidates.length ? 'what it could be is taken' : 'nothing of its kind in its room',
     })
+  }
+  for (const o of open) {
+    if (!o.waiting) continue
+    links.set(o.e.entity_id, { entityId: o.e.entity_id, status: 'unplaced', candidates: o.candidates, why: `waiting for which room "${o.waiting}" is` })
   }
 
   const linked = new Set([...links.values()].flatMap((l) => (l.thingId ? [l.thingId] : [])))

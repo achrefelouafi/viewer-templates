@@ -1030,7 +1030,7 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
             </button>
           ))}
         </div>
-        <div className="overflow-y-auto py-1">
+        <div className="ui-scroll overflow-y-auto py-1">
           {tab === 'rooms'
             ? areas.map((area) => (
               <section key={area.id} aria-label={area.name}>

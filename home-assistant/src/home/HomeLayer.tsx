@@ -6,9 +6,10 @@ import { type Area, domainOf, type FieldKind, type HomeDevice } from './entities
 import { useHass } from './hass/connection'
 import { HomeEffects, type PinRefs } from './HomeEffects'
 import { HomePanel } from './HomePanel'
-import { anchorOf, entityInfos, type Link, linkHome, type LinkReport } from './link/match'
+import { anchorOf, entityInfos, type Link, linkHome, type LinkReport, wantsOf } from './link/match'
 import { formatReport } from './link/report'
-import { type GraphNodes, polygonOf, readThings, type Thing } from './link/scene'
+import { type GraphNodes, polygonOf, readThings, type Room, type Thing } from './link/scene'
+import { normalize } from './link/words'
 import { HomeNoir } from './sketch/HomeNoir'
 
 /* Home Assistant on a Pascal project: the visitor connects their own Home Assistant, its entities
@@ -18,36 +19,46 @@ import { HomeNoir } from './sketch/HomeNoir'
 
 const FLOOR_Y = 0.05
 
-/** The visitor's own answers: entity → the thing it drives, or null for "not in the plan". */
-type Picks = Record<string, string | null>
-const picksKey = (projectId: string, hassUrl: string) => `pascal-ha-links:${projectId}:${hassUrl}`
-
-function usePicks(projectId: string, hassUrl: string) {
-  const key = picksKey(projectId, hassUrl)
-  const [picks, setPicks] = useState<Picks>(() => JSON.parse(localStorage.getItem(key) ?? '{}') as Picks)
-  useEffect(() => setPicks(JSON.parse(localStorage.getItem(key) ?? '{}') as Picks), [key])
-  const pick = useCallback((entityId: string, thingId: string | null) => {
-    setPicks((p) => {
-      const next = { ...p, [entityId]: thingId }
+/** Answers the visitor gave, kept in this browser per project and Home Assistant. */
+function useAnswers<T>(kind: string, projectId: string, hassUrl: string) {
+  const key = `pascal-ha-${kind}:${projectId}:${hassUrl}`
+  const read = () => JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, T>
+  const [answers, setAnswers] = useState<Record<string, T>>(read)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a new key only
+  useEffect(() => setAnswers(read()), [key])
+  const answer = useCallback((name: string, value: T) => {
+    setAnswers((a) => {
+      const next = { ...a, [name]: value }
       localStorage.setItem(key, JSON.stringify(next))
       return next
     })
   }, [key])
-  const forget = useCallback(() => {
-    localStorage.removeItem(key)
-    setPicks({})
+  const forget = useCallback((name: string) => {
+    setAnswers((a) => {
+      const next = { ...a }
+      delete next[name]
+      localStorage.setItem(key, JSON.stringify(next))
+      return next
+    })
   }, [key])
-  return { picks, pick, forget }
+  return { answers, answer, forget }
 }
 
-/** The visitor's answers over the matching's. */
-function withPicks(report: LinkReport, picks: Picks): Link[] {
-  return report.links.map((l) => {
-    if (!(l.entityId in picks)) return l
-    const thingId = picks[l.entityId]
-    return thingId
-      ? { ...l, status: 'sure', thingId, why: 'you picked it' }
-      : { ...l, status: 'missing', thingId: undefined, why: 'you said it is not in the plan' }
+/** The visitor's links over the matching's: entity → the thing it drives, or null for none. A
+    link made by hand takes the thing from whatever the matching had put there in its domain. */
+function withPicks(report: LinkReport, picks: Record<string, string | null>): Link[] {
+  const handled = new Set(Object.entries(picks).flatMap(([id, thing]) => (thing ? [`${thing}|${domainOf(id)}`] : [])))
+  return report.links.map((l): Link => {
+    if (l.entityId in picks) {
+      const thingId = picks[l.entityId]
+      return thingId
+        ? { ...l, status: 'sure', thingId, why: 'you linked it' }
+        : { ...l, status: 'missing', thingId: undefined, why: 'you unlinked it' }
+    }
+    if (l.thingId && handled.has(`${l.thingId}|${domainOf(l.entityId)}`)) {
+      return { ...l, status: 'unplaced', thingId: undefined, why: 'you linked another device to its thing' }
+    }
+    return l
   })
 }
 
@@ -73,6 +84,11 @@ function drawnCentre(source: ViewerSource, t: Thing): [number, number, number] {
   return [c.x, c.y, c.z]
 }
 
+/** A question the linking leaves to the visitor: which room an area is, or which thing an entity drives. */
+export type Question =
+  | { kind: 'area'; area: string; choices: Room[]; devices: number }
+  | { kind: 'entity'; link: Link }
+
 export type HomeLayer = ReturnType<typeof useHomeLayer>
 
 /**
@@ -89,18 +105,23 @@ export function useHomeLayer({ projectId, source, ready }: { projectId: string; 
     // development builds only: the connection's store on `window.__hass`, for debugging
     if (import.meta.env.DEV) (window as unknown as { __hass: unknown }).__hass = useHass
   }, [])
-  const { picks, pick, forget } = usePicks(projectId, hassUrl)
+  const linkAnswers = useAnswers<string | null>('links', projectId, hassUrl)
+  const roomAnswers = useAnswers<string | null>('areas', projectId, hassUrl)
+  const picks = linkAnswers.answers
 
   const nodes = source.nodes as unknown as GraphNodes
-  const plan = useMemo(() => readThings(nodes), [nodes])
+  // items linked by hand are read even where the word table finds no device in them
+  const include = useMemo(() => new Set(Object.values(picks).flatMap((t) => (t ? [t] : []))), [picks])
+  const plan = useMemo(() => readThings(nodes, { include }), [nodes, include])
   const areas = useMemo(() => areasOf(nodes), [nodes])
   // which entities there are and where, not their states: the links stay put as states change
   const entityKey = useMemo(() => Object.keys(entities).sort().join(','), [entities])
-  const report = useMemo(() => {
-    const infos = entityInfos(useHass.getState().entities, (id) => areaOf[id])
-    return linkHome(plan.things, infos, plan.rooms)
+  const infos = useMemo(
+    () => entityInfos(useHass.getState().entities, (id) => areaOf[id]),
     // biome-ignore lint/correctness/useExhaustiveDependencies: on new entities, not new states
-  }, [plan, entityKey, areaOf])
+    [entityKey, areaOf],
+  )
+  const report = useMemo(() => linkHome(plan.things, infos, plan.rooms, roomAnswers.answers), [plan, infos, roomAnswers.answers])
   const links = useMemo(() => withPicks(report, picks), [report, picks])
 
   const devices = useMemo<HomeDevice[]>(() => {
@@ -133,8 +154,26 @@ export function useHomeLayer({ projectId, source, ready }: { projectId: string; 
     ;(window as unknown as { __homeLinks: () => void }).__homeLinks = () =>
       console.log(formatReport({ ...report, links }, plan.things), { things: plan.things, links, others })
   }, [report, links, plan, nodes])
-  const asking = useMemo(() => links.filter((l) => l.status === 'ask'), [links])
-  return { status, connected: status === 'connected', entities, devices, areas, kept, links, asking, things: plan.things, pick, forget, source }
+
+  // the questions: rooms first (one answer can place several devices), then single devices
+  const questions = useMemo<Question[]>(() => {
+    const placeable = new Set(links.filter((l) => l.status !== 'home').map((l) => l.entityId))
+    const count = (area: string) => infos.filter((e) => e.area === area && placeable.has(e.entity_id)).length
+    const rooms = report.areas
+      .filter((a) => (a.how === 'unsure' || a.how === 'none') && count(a.area) > 0)
+      .map((a): Question => ({ kind: 'area', area: a.area, choices: a.choices, devices: count(a.area) }))
+    return [...rooms, ...links.filter((l) => l.status === 'ask').map((link): Question => ({ kind: 'entity', link }))]
+  }, [report, links, infos])
+
+  return {
+    status, connected: status === 'connected', entities, devices, areas, kept, links, questions, infos, things: plan.things, rooms: plan.rooms, source,
+    /** Links an entity to a thing by hand, or to nothing. */
+    pick: linkAnswers.answer,
+    /** Takes back a hand-made link: the matching decides again. */
+    unpick: linkAnswers.forget,
+    /** Says which room a Home Assistant area is, or null for none of the plan's. */
+    placeArea: roomAnswers.answer,
+  }
 }
 
 /** Inside the viewer's canvas: the wireframe over all but the linked items, and their effects. */
@@ -166,6 +205,10 @@ export function HomeOverlay({ home, title, pins, selected, layer, onSelect, onLa
   onGroup?: (entityIds: string[]) => void
 }) {
   const call = useHass((s) => s.call)
+  // an item picked on the plan (Pascal's own selection: a room first, then what is in it)
+  const pickedId = useViewer((s) => s.selection.selectedIds[0] ?? null)
+  const pickedType = pickedId ? (home.source.nodes as unknown as GraphNodes)[pickedId]?.type : undefined
+  const itemId = pickedType === 'item' || pickedType === 'door' || pickedType === 'window' ? pickedId : null
   return (
     <>
       {home.connected && (
@@ -173,8 +216,11 @@ export function HomeOverlay({ home, title, pins, selected, layer, onSelect, onLa
           layer={layer} pins={pins} onSelect={onSelect} call={(d, s, data) => call(d, s, data)} onLayer={onLayer} {...(onGroup ? { onGroup } : {})} />
       )}
       <ConnectCard home={home} />
-      {/* the questions sit where a device's controls open, so not while one is open */}
-      {home.connected && !selected && home.asking.length > 0 && <AskCard home={home} />}
+      {/* the cards sit where a device's controls open, so not while one is open */}
+      {home.connected && !selected && itemId && (
+        <LinkCard home={home} itemId={itemId} key={itemId} onClose={() => useViewer.getState().setSelection({ selectedIds: [] })} />
+      )}
+      {home.connected && !selected && !itemId && home.questions.length > 0 && <QuestionCard home={home} />}
     </>
   )
 }
@@ -229,27 +275,67 @@ function ConnectCard({ home }: { home: HomeLayer }) {
   )
 }
 
-/** The links the matching left open: which of these is it? */
-function AskCard({ home }: { home: HomeLayer }) {
-  const call = useHass((s) => s.call)
-  const byId = useMemo(() => new Map(home.things.map((t) => [t.id, t])), [home.things])
-  const [index, setIndex] = useState(0)
-  const link = home.asking[Math.min(index, home.asking.length - 1)]
+/** A card on the right, where a device's controls open. */
+const CARD = 'pointer-events-auto absolute top-4 right-4 z-30 grid w-[min(20rem,calc(100vw-2rem))] gap-3 rounded-2xl border border-border/60 bg-background/95 p-4 text-sm shadow-lg backdrop-blur'
+const ROW = 'flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-foreground/8'
+
+/** Lights up a thing on the plan while a choice is pointed at, as Pascal's own hover does. */
+function useHoverThing() {
   const hovered = useRef<string | null>(null)
   useEffect(() => () => void (hovered.current && useViewer.getState().setHoveredId(null)), [])
-  if (!link) return null
-  const e = home.entities[link.entityId]
-  const name = e?.attributes.friendly_name ?? link.entityId
-  const canBlink = ['light', 'switch', 'fan', 'media_player'].includes(domainOf(link.entityId))
-  const hover = (id: string | null) => {
+  return (id: string | null) => {
     hovered.current = id
     useViewer.getState().setHoveredId(id as never)
   }
+}
+
+/** The questions the linking left: which room an area is, then which thing a device drives. */
+function QuestionCard({ home }: { home: HomeLayer }) {
+  const call = useHass((s) => s.call)
+  const byId = useMemo(() => new Map(home.things.map((t) => [t.id, t])), [home.things])
+  const [index, setIndex] = useState(0)
+  const hover = useHoverThing()
+  const at = Math.min(index, home.questions.length - 1)
+  const q = home.questions[at]
+  if (!q) return null
+  const counter = <span className="font-mono text-muted-foreground text-xs">{at + 1}/{home.questions.length}</span>
+  const later = home.questions.length > 1 && (
+    <Button className="rounded-full" onClick={() => setIndex((i) => (i + 1) % home.questions.length)} size="sm" variant="ghost">Later</Button>
+  )
+
+  if (q.kind === 'area') {
+    return (
+      <div className={CARD}>
+        <div className="flex items-baseline justify-between gap-2">
+          <b className="font-medium">Which room is "{q.area}"?</b>
+          {counter}
+        </div>
+        <span className="text-muted-foreground text-xs">
+          {q.devices} {q.devices === 1 ? 'device' : 'devices'} in this Home Assistant area. {q.choices.length < home.rooms.length ? 'It could be more than one room of your plan.' : 'No room of your plan has that name.'}
+        </span>
+        <ul className="ui-scroll grid max-h-64 gap-1 overflow-y-auto">
+          {q.choices.map((room) => (
+            <li key={room.id}>
+              <button className={ROW} onClick={() => home.placeArea(q.area, room.id)} type="button">{room.name}</button>
+            </li>
+          ))}
+        </ul>
+        <div className="flex justify-between gap-2">
+          <Button className="rounded-full" onClick={() => home.placeArea(q.area, null)} size="sm" variant="ghost">None of these</Button>
+          {later}
+        </div>
+      </div>
+    )
+  }
+
+  const { link } = q
+  const name = home.entities[link.entityId]?.attributes.friendly_name ?? link.entityId
+  const canBlink = ['light', 'switch', 'fan', 'media_player'].includes(domainOf(link.entityId))
   return (
-    <div className="pointer-events-auto absolute top-4 right-4 z-30 grid w-[min(20rem,calc(100vw-2rem))] gap-3 rounded-2xl border border-border/60 bg-background/95 p-4 text-sm shadow-lg backdrop-blur">
+    <div className={CARD}>
       <div className="flex items-baseline justify-between gap-2">
         <b className="font-medium">Which one is {name}?</b>
-        <span className="font-mono text-muted-foreground text-xs">{Math.min(index, home.asking.length - 1) + 1}/{home.asking.length}</span>
+        {counter}
       </div>
       {canBlink && (
         <Button className="justify-self-start rounded-full" onClick={() => blink(call, link.entityId)} size="sm" variant="secondary">
@@ -261,18 +347,8 @@ function AskCard({ home }: { home: HomeLayer }) {
           const t = byId.get(c.thingId)
           return (
             <li key={c.thingId}>
-              <button
-                className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-foreground/8"
-                onBlur={() => hover(null)}
-                onClick={() => {
-                  hover(null)
-                  home.pick(link.entityId, c.thingId)
-                }}
-                onFocus={() => hover(c.thingId)}
-                onMouseEnter={() => hover(c.thingId)}
-                onMouseLeave={() => hover(null)}
-                type="button"
-              >
+              <button className={ROW} onBlur={() => hover(null)} onClick={() => { hover(null); home.pick(link.entityId, c.thingId) }}
+                onFocus={() => hover(c.thingId)} onMouseEnter={() => hover(c.thingId)} onMouseLeave={() => hover(null)} type="button">
                 <span className="truncate">{t?.label ?? c.thingId}</span>
                 <span className="shrink-0 text-muted-foreground text-xs">{t?.rooms.map((r) => r.name).join(', ')}</span>
               </button>
@@ -282,10 +358,76 @@ function AskCard({ home }: { home: HomeLayer }) {
       </ul>
       <div className="flex justify-between gap-2">
         <Button className="rounded-full" onClick={() => home.pick(link.entityId, null)} size="sm" variant="ghost">Not in the plan</Button>
-        {home.asking.length > 1 && (
-          <Button className="rounded-full" onClick={() => setIndex((i) => (i + 1) % home.asking.length)} size="sm" variant="ghost">Later</Button>
-        )}
+        {later}
       </div>
+    </div>
+  )
+}
+
+/** An item picked on the plan: the devices it drives, and any device of the home to link to it. */
+function LinkCard({ home, itemId, onClose }: { home: HomeLayer; itemId: string; onClose: () => void }) {
+  const [query, setQuery] = useState('')
+  const node = (home.source.nodes as unknown as GraphNodes)[itemId]
+  const thing = home.things.find((t) => t.id === itemId)
+  const label = thing?.label ?? node?.name ?? node?.asset?.name ?? 'This item'
+  const rooms = thing?.rooms ?? []
+  const linked = home.links.filter((l) => l.thingId === itemId)
+  const nameOfEntity = (id: string) => home.entities[id]?.attributes.friendly_name ?? id
+  // what could be linked: devices (not people, scenes or the weather), the likeliest first
+  const choices = useMemo(() => {
+    const words = normalize(query)
+    const roomNames = new Set(rooms.map((r) => r.name))
+    const placeable = new Set(home.links.filter((l) => l.status !== 'home' && l.thingId !== itemId).map((l) => l.entityId))
+    return home.infos
+      .filter((e) => placeable.has(e.entity_id) && (!words || normalize(`${e.name} ${e.entity_id}`).includes(words)))
+      .map((e) => {
+        const wants = wantsOf(e)
+        const fits = thing && wants.place === 'thing' && (wants.kinds.includes(thing.kind) || wants.also?.includes(thing.kind))
+        const here = home.links.find((l) => l.entityId === e.entity_id)?.roomId
+        const sameRoom = rooms.some((r) => r.id === here) || (e.area !== undefined && roomNames.has(e.area))
+        return { e, score: (fits ? 2 : 0) + (sameRoom ? 1 : 0) }
+      })
+      .sort((a, b) => b.score - a.score || a.e.name.localeCompare(b.e.name))
+      .slice(0, 8)
+  }, [query, home.infos, home.links, itemId, rooms, thing])
+
+  return (
+    <div className={CARD}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="grid min-w-0">
+          <b className="truncate font-medium">{label}</b>
+          <span className="text-muted-foreground text-xs">{rooms.map((r) => r.name).join(', ') || 'Outside any room'}</span>
+        </div>
+        <Button className="rounded-full" onClick={onClose} size="sm" variant="ghost">Close</Button>
+      </div>
+      {linked.length > 0 && (
+        <ul className="grid gap-1">
+          {linked.map((l) => (
+            <li className="flex items-center justify-between gap-2 rounded-xl bg-foreground/5 px-3 py-2" key={l.entityId}>
+              <span className="truncate">{nameOfEntity(l.entityId)}</span>
+              <Button className="rounded-full" onClick={() => home.pick(l.entityId, null)} size="sm" variant="ghost">Unlink</Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <input
+        aria-label="Find a device to link"
+        className="h-9 rounded-full border border-border bg-background px-3.5 outline-none focus:border-foreground/40"
+        onChange={(ev) => setQuery(ev.target.value)}
+        placeholder={linked.length ? 'Link another device…' : 'Link a device…'}
+        value={query}
+      />
+      <ul className="ui-scroll grid max-h-64 gap-1 overflow-y-auto">
+        {choices.map(({ e }) => (
+          <li key={e.entity_id}>
+            <button className={ROW} onClick={() => home.pick(e.entity_id, itemId)} type="button">
+              <span className="truncate">{e.name}</span>
+              <span className="shrink-0 text-muted-foreground text-xs">{e.area ?? 'No area'}</span>
+            </button>
+          </li>
+        ))}
+        {!choices.length && <li className="px-3 py-2 text-muted-foreground text-xs">No device matches.</li>}
+      </ul>
     </div>
   )
 }

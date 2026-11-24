@@ -134,7 +134,16 @@ export const useHass = create<HassState>((set, get) => {
       const areaOf = await readAreas(connection)
       unsubscribe?.()
       unsubscribe = subscribeEntities(connection, (entities) => set({ entities: entities as unknown as HassEntities }))
-      connection.addEventListener('ready', () => void readAreas(connection).then((a) => set({ areaOf: a })))
+      // rooms change while the plan is open (a device put in an area): read them again, once a burst settles
+      let pending = 0
+      const reread = () => {
+        window.clearTimeout(pending)
+        pending = window.setTimeout(() => void readAreas(connection).then((a) => set({ areaOf: a })), 400)
+      }
+      connection.addEventListener('ready', reread)
+      for (const event of ['area_registry_updated', 'device_registry_updated', 'entity_registry_updated']) {
+        void connection.subscribeEvents(reread, event)
+      }
       set({ status: 'connected', connection, areaOf })
     } catch (failure) {
       if (failure === ERR_INVALID_AUTH) saveTokens(null)

@@ -10,7 +10,7 @@ export function formatReport(report: LinkReport, things: Thing[]): string {
   }
   const lines = ['Areas → rooms']
   for (const a of report.areas) lines.push(`  ${a.area} → ${a.room ? `${a.room.name} (${a.likeness})` : 'no room'}`)
-  const order = ['sure', 'likely', 'ask', 'missing', 'room', 'home'] as const
+  const order = ['sure', 'likely', 'ask', 'unplaced', 'missing', 'room', 'home'] as const
   for (const status of order) {
     const links = report.links.filter((l) => l.status === status)
     if (!links.length) continue
