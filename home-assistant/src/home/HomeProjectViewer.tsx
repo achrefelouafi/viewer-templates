@@ -1,6 +1,6 @@
 import { initSpatialGridSync, sceneRegistry, useScene } from '@pascal-app/core'
 import { InteractiveSystem, SceneEnvironment, useViewer, Viewer } from '@pascal-app/viewer'
-import { SceneLoader, useViewerFloorDisplay, ViewerSelectionManager, type ViewerSource } from '@pascal-app/viewer/ui'
+import { SceneLoader, selectViewerLevel, useViewerFloorDisplay, type ViewerSource } from '@pascal-app/viewer/ui'
 import { useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
@@ -88,11 +88,21 @@ function HomeStage({ projectId, title, sceneReady, onSceneReady, sceneKey }: {
   const view = useMemo(() => viewOf(home.areas), [home.areas])
   // a floor picked from the list reads as on the default viewer: the floors above step aside
   useViewerFloorDisplay()
-  // an item picked on the plan opens its links where a device's controls would: one card at a time
-  const picked = useViewer((s) => s.selection.selectedIds[0])
+  // open on the lowest floor that has rooms, as the lab shows its home: the roof out of the way
+  const opened = useRef(false)
   useEffect(() => {
-    if (picked) setSelected(null)
-  }, [picked])
+    if (!sceneReady || opened.current) return
+    opened.current = true
+    const levels = Object.values(nodes).filter((n): n is Extract<typeof n, { type: 'level' }> => n?.type === 'level').sort((a, b) => a.level - b.level)
+    const roomed = levels.find((l) => Object.values(nodes).some((n) => n?.type === 'zone' && n.parentId === l.id))
+    if (levels.length > 1 && roomed) selectViewerLevel(roomed.id, source)
+  }, [sceneReady, nodes, source])
+  // an item clicked on the plan opens its links where a device's controls would: one card at a time
+  const [itemId, setItemId] = useState<string | null>(null)
+  const pickItem = useCallback((id: string | null) => {
+    setItemId(id)
+    if (id) setSelected(null)
+  }, [])
 
   const press = useCallback((id: string) => setSelected((s) => (s === id ? s : id)), [])
   const select = useCallback((id: string | null) => {
@@ -120,13 +130,14 @@ function HomeStage({ projectId, title, sceneReady, onSceneReady, sceneKey }: {
         <CameraRig device={device} group={group} home={view} />
         {import.meta.env.DEV && <DevHandle />}
         <InteractiveSystem />
-        {/* Pascal's own picking, as on the default viewer: a click selects a room, then an item in it */}
-        <ViewerSelectionManager />
+        {/* a click on an item opens its links; no hover, no room highlight */}
+        <ItemPicker nodes={nodes} onPick={pickItem} />
         {/* the guided tour's wireframe over everything but what Home Assistant drives, and their effects */}
         <HomeScene home={home} layer={layer} onPress={press} pins={pins} selected={selected} />
       </Viewer>
 
-      <HomeOverlay home={home} layer={layer} onGroup={zoomTo} onLayer={setLayer} onSelect={select} pins={pins} selected={selected} title={title} />
+      <HomeOverlay home={home} itemId={itemId} layer={layer} onCloseItem={() => setItemId(null)} onGroup={zoomTo} onLayer={setLayer} onSelect={select} pins={pins}
+        selected={selected} title={title} />
 
       {/* the floors, as on the default viewer: the whole building or one floor alone */}
       <LevelPicker className="absolute right-4 bottom-4 z-30 sm:bottom-6" source={source} />
@@ -137,11 +148,59 @@ function HomeStage({ projectId, title, sceneReady, onSceneReady, sceneKey }: {
   )
 }
 
+/** What a click can pick: things a device can be. */
+const PICKABLE = new Set(['item', 'door', 'window'])
+
+/**
+ * A click (not a drag) on the plan picks the item under it: the first item along the ray, seen
+ * through the ghosted walls, floors and roofs in front of it. Nothing on hover. A click on no item
+ * picks nothing.
+ */
+function ItemPicker({ nodes, onPick }: { nodes: Record<string, { type?: string } | undefined>; onPick: (id: string | null) => void }) {
+  const { gl, camera, scene } = useThree()
+  const live = useRef({ nodes, onPick })
+  live.current = { nodes, onPick }
+  useEffect(() => {
+    const el = gl.domElement
+    const ray = new THREE.Raycaster()
+    const at = new THREE.Vector2()
+    let down: { x: number; y: number } | null = null
+    const onDown = (e: PointerEvent) => {
+      down = e.button === 0 ? { x: e.clientX, y: e.clientY } : null
+    }
+    const onUp = (e: PointerEvent) => {
+      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return
+      down = null
+      const r = el.getBoundingClientRect()
+      at.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1)
+      ray.setFromCamera(at, camera)
+      const owner = new Map<THREE.Object3D, string>()
+      for (const [id, obj] of sceneRegistry.nodes) owner.set(obj, id)
+      for (const hit of ray.intersectObjects(scene.children, true)) {
+        if (!hit.object.visible) continue
+        for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) {
+          const id = owner.get(o)
+          if (id && PICKABLE.has(live.current.nodes[id]?.type ?? '')) return live.current.onPick(id)
+        }
+      }
+      live.current.onPick(null)
+    }
+    el.addEventListener('pointerdown', onDown)
+    el.addEventListener('pointerup', onUp)
+    return () => {
+      el.removeEventListener('pointerdown', onDown)
+      el.removeEventListener('pointerup', onUp)
+    }
+  }, [gl, camera, scene])
+  return null
+}
+
 /** Development builds only: the three.js state on `window.__lab`, as in the lab. */
 function DevHandle() {
   const state = useThree()
   useEffect(() => {
     ;(window as unknown as { __lab: unknown }).__lab = state
+    ;(window as unknown as { __sceneRegistry: unknown }).__sceneRegistry = sceneRegistry
   }, [state])
   return null
 }

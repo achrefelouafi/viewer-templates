@@ -166,6 +166,9 @@ export type HomeDevice = {
   path?: V3[]
   /** The Pascal node it drives (a door the lock and contact sensor open). */
   nodeId?: string
+  /** The effect to draw, where the thing it is linked to decides rather than the entity: a wall
+      thermostat drives the heating but blows no air of its own ('none'). */
+  effect?: EffectFamily
 }
 
 /* ---------------- lights ---------------- */

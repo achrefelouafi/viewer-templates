@@ -98,7 +98,8 @@ function tourAppearance(dark: boolean) {
   }
 }
 
-type NoirRole = 'wall' | 'floor' | 'item' | 'glass' | 'ground'
+/** 'none': a surface left out of the drawing (a ceiling), whose children (the fans hung from it) still draw. */
+type NoirRole = 'wall' | 'floor' | 'item' | 'glass' | 'ground' | 'none'
 
 type NodeLike = {
   id?: string
@@ -610,12 +611,14 @@ function createKit(palette: Palette) {
   const ground = new MeshStandardNodeMaterial({ color: palette.ground, roughness: 1, metalness: 0 })
   const wallEdge = new LineBasicNodeMaterial({ color: palette.edge, transparent: true, opacity: palette.wallEdgeOpacity, depthWrite: false })
   const itemEdge = new LineBasicNodeMaterial({ color: palette.edge, transparent: true, opacity: palette.itemEdgeOpacity, depthWrite: false })
+  // Draws nothing: the mesh stays in the scene (and visible), so what Pascal parents under it still draws.
+  const none = new MeshStandardNodeMaterial({ visible: false })
   // Lines write nothing to the scene pass's normals and diffuse colour (as Pascal's own dust and
   // light glows do), so the screen-space ink doesn't double the edges.
   for (const line of [wallEdge, itemEdge]) line.mrtNode = mrt({ output, diffuseColor: vec4(0), normal: vec4(0) })
-  for (const material of [wall, item, floor, glass, ground, wallEdge, itemEdge]) material.userData.__tourNoir = true
+  for (const material of [wall, item, floor, glass, ground, wallEdge, itemEdge, none]) material.userData.__tourNoir = true
   return {
-    wall, item, floor, glass, ground, wallEdge, itemEdge,
+    wall, item, floor, glass, ground, wallEdge, itemEdge, none,
     paint(next: Palette) {
       wall.color.set(next.wall)
       wall.opacity = next.wallOpacity
@@ -631,7 +634,7 @@ function createKit(palette: Palette) {
       itemEdge.opacity = next.itemEdgeOpacity
     },
     dispose() {
-      for (const material of [wall, item, floor, glass, ground, wallEdge, itemEdge]) material.dispose()
+      for (const material of [wall, item, floor, glass, ground, wallEdge, itemEdge, none]) material.dispose()
     },
   }
 }
@@ -643,13 +646,46 @@ type CullingPipeline = { isCulled?: (object: THREE.Object3D, camera: THREE.Camer
 
 function surfaceFor(kit: Kit, role: NoirRole): THREE.Material {
   if (role === 'ground') return kit.ground
+  if (role === 'none') return kit.none
   return role === 'wall' ? kit.wall : role === 'item' ? kit.item : role === 'floor' ? kit.floor : kit.glass
 }
 
 /**
- * @param keep the graph node ids Home Assistant drives: these stay in their own colours.
+ * Puts the tour's surface on a mesh and keeps it there: Pascal and its plugins assign materials of
+ * their own whenever they like (the pool its water, every frame), and an assignment now only
+ * updates the material given back on unmount.
  */
-export function HomeNoir({ source, keep }: { source: ViewerSource; keep: ReadonlySet<string> }) {
+function pinMaterial(mesh: THREE.Mesh, surface: THREE.Material, saved: MeshStash) {
+  Object.defineProperty(mesh, 'material', {
+    configurable: true,
+    enumerable: true,
+    get: () => surface,
+    set: (next: THREE.Material | THREE.Material[]) => {
+      if (!isTourMaterial(next)) saved.material = next
+    },
+  })
+}
+
+/** Gives a mesh its own material back, and its material property back to three. */
+function unpinMaterial(mesh: THREE.Mesh, saved: MeshStash) {
+  delete (mesh as { material?: unknown }).material
+  mesh.material = saved.material
+}
+
+/** The kind of the Pascal node a mesh belongs to: its nearest owner in the graph. */
+function ownerKind(mesh: THREE.Object3D, owners: Map<THREE.Object3D, NodeOwner>): string | null {
+  for (let at: THREE.Object3D | null = mesh; at; at = at.parent) {
+    const owner = owners.get(at)
+    if (owner) return owner.kind
+  }
+  return null
+}
+
+/**
+ * @param keep the graph node ids Home Assistant drives: these stay in their own colours.
+ * @param hide node kinds to leave out of the drawing altogether (the lab has no ceilings)
+ */
+export function HomeNoir({ source, keep, hide }: { source: ViewerSource; keep: ReadonlySet<string>; hide?: ReadonlySet<string> }) {
   const { scene, invalidate, gl } = useThree()
   const dark = useDarkTheme()
   const palette = PALETTES[dark ? 'noir' : 'paper']
@@ -670,17 +706,25 @@ export function HomeNoir({ source, keep }: { source: ViewerSource; keep: Readonl
   const appearance = useMemo(() => tourAppearance(dark), [dark])
   useLayoutEffect(() => {
     const before = useViewer.getState()
-    const saved = { edges: before.edges, shadows: before.shadows }
-    const apply = () => useViewer.setState({ edges: 'soft', shadows: true, sceneAppearance: appearance as never })
+    const saved = { edges: before.edges, shadows: before.shadows, textures: before.textures }
+    // Textures on: with a saved "textures off" preference Pascal paints every model in plain clay,
+    // and what Home Assistant drives would lose its own colours.
+    const apply = () => useViewer.setState({ edges: 'soft', shadows: true, textures: true, sceneAppearance: appearance as never })
     apply()
     // Anything that resolves the look again (a theme pick, a project preference) would bring the
     // saved theme back; put the Noir one back on.
     const unsubscribe = useViewer.subscribe((state) => {
-      if (state.sceneAppearance !== (appearance as never)) apply()
+      if (state.sceneAppearance !== (appearance as never) || !state.textures) apply()
     })
+    // `textures` is a saved preference: the visitor's own goes back before the page closes
+    const leave = () => useViewer.setState({ textures: saved.textures })
+    window.addEventListener('pagehide', leave)
+    window.addEventListener('pageshow', apply)
     return () => {
       unsubscribe()
-      useViewer.setState({ edges: saved.edges, shadows: saved.shadows })
+      window.removeEventListener('pagehide', leave)
+      window.removeEventListener('pageshow', apply)
+      useViewer.setState({ edges: saved.edges, shadows: saved.shadows, textures: saved.textures })
       useViewer.getState().showSceneTheme(useViewer.getState().previewSceneTheme)
     }
   }, [appearance])
@@ -720,15 +764,16 @@ export function HomeNoir({ source, keep }: { source: ViewerSource; keep: Readonl
         }
         const ground = obj as THREE.Mesh
         if (ground.isMesh && obj.userData?.[SITE_GROUND] !== 'veil' && !meshes.has(ground)) {
-          meshes.set(ground, {
+          const saved: MeshStash = {
             material: ground.material,
             castShadow: ground.castShadow,
             receiveShadow: ground.receiveShadow,
             role: 'ground',
             geometryUuid: ground.geometry.uuid,
             edge: null,
-          })
-          ground.material = kit.ground
+          }
+          meshes.set(ground, saved)
+          pinMaterial(ground, kit.ground, saved)
         }
         return
       }
@@ -748,18 +793,22 @@ export function HomeNoir({ source, keep }: { source: ViewerSource; keep: Readonl
       if (materialIsInvisibleHitbox(mesh.material) || !mesh.visible || isTourMaterial(mesh.material)) return
       // Home Assistant's things keep their colours: connected nodes, and all that isn't the graph's.
       if (ownership(mesh, owners, keepRef.current) !== 'graph') return
-      const classified = classifyMesh(mesh, owners)
+      // what the plan leaves out (ceilings): its surface draws nothing. Never `visible = false`: Pascal
+      // hangs a ceiling's items (the fans) under its mesh, and they would vanish with it
+      const kind = hide?.size ? ownerKind(mesh, owners) : null
+      const classified = kind && hide?.has(kind) ? { role: 'none' as const } : classifyMesh(mesh, owners)
       if (!classified) return
       const { role } = classified
-      meshes.set(mesh, {
+      const saved: MeshStash = {
         material: mesh.material,
         castShadow: mesh.castShadow,
         receiveShadow: mesh.receiveShadow,
         role,
         geometryUuid: mesh.geometry.uuid,
         edge: addEdges(mesh, role),
-      })
-      mesh.material = surfaceFor(kit, role)
+      }
+      meshes.set(mesh, saved)
+      pinMaterial(mesh, surfaceFor(kit, role), saved)
       mesh.castShadow = false
       mesh.receiveShadow = role === 'floor'
     })
@@ -769,7 +818,7 @@ export function HomeNoir({ source, keep }: { source: ViewerSource; keep: Readonl
   const restore = (mesh: THREE.Mesh, saved: MeshStash) => {
     saved.edge?.removeFromParent()
     saved.edge?.geometry.dispose()
-    if (mesh.material === surfaceFor(kit, saved.role)) mesh.material = saved.material
+    unpinMaterial(mesh, saved)
     mesh.castShadow = saved.castShadow
     mesh.receiveShadow = saved.receiveShadow
   }
@@ -824,20 +873,10 @@ export function HomeNoir({ source, keep }: { source: ViewerSource; keep: Readonl
     }
   }, [pipeline, invalidate])
 
-  // Pascal swaps materials when it rebuilds or relights a mesh; keep the Noir ones on, and pick up
-  // meshes that arrive late (items loading, walls rebuilt).
+  // Pick up meshes that arrive late (items loading, walls rebuilt). The surfaces stay on by
+  // themselves (`pinMaterial`).
   useFrame((_, delta) => {
     const state = stash.current
-    for (const [mesh, saved] of state.meshes) {
-      // Pascal takes some meshes out of the scene for a moment and puts them back: their edges are
-      // children and travel with them, so a detached mesh is simply left be.
-      if (!mesh.parent) continue
-      const surface = surfaceFor(kit, saved.role)
-      if (mesh.material !== surface) {
-        if (!isTourMaterial(mesh.material)) saved.material = mesh.material
-        mesh.material = surface
-      }
-    }
     for (const obj of state.hidden.keys()) obj.visible = false
     // Pascal attaches its culler again when batches are rebuilt: keep it off.
     if (pipeline && culling.current && pipeline.isCulled !== culling.current.own) {

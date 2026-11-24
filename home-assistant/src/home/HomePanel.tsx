@@ -984,7 +984,7 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
             data-name={nameOf(e)}
             // a pin grouped with others under it shows "+n" (data-more, set by the canvas)
             // plain circles as in the site's viewer: dark and quiet when off, white with a soft halo when on
-            className={`group pointer-events-auto absolute top-0 left-0 grid place-items-center rounded-full transition-[opacity,transform] hover:scale-110 after:absolute after:-top-1 after:-right-1.5 after:hidden after:min-w-4 after:rounded-full after:bg-foreground after:px-1 after:text-center after:font-mono after:text-[9px] after:text-background after:leading-4 after:content-[attr(data-more)] data-[more]:after:block ${
+            className={`group pointer-events-auto absolute top-0 left-0 grid place-items-center rounded-full transition-[opacity,scale] hover:scale-110 after:absolute after:-top-1 after:-right-1.5 after:hidden after:min-w-4 after:rounded-full after:bg-foreground after:px-1 after:text-center after:font-mono after:text-[9px] after:text-background after:leading-4 after:content-[attr(data-more)] data-[more]:after:block ${
               selected && !focused ? 'opacity-30' : ''} ${focused ? 'size-10' : 'size-7'} ${on
                 ? 'bg-foreground text-background shadow-[0_0_0_4px_color-mix(in_oklab,var(--foreground)_16%,transparent)]'
                 : 'border border-foreground/15 bg-background/80 text-muted-foreground backdrop-blur'}`}>

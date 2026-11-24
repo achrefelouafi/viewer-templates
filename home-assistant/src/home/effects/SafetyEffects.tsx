@@ -1,4 +1,4 @@
-import { useInteractive, type AnyNodeId } from '@pascal-app/core'
+import { useInteractive, useScene, type AnyNodeId } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
@@ -18,21 +18,44 @@ const set = (m: { uniforms: Record<string, { value: unknown }> }, k: string, v: 
   else u.value = v
 }
 
-/** Opens or closes a Pascal door node the way its own interaction does, so the model's door swings. */
-export function usePascalDoor(nodeId: string | undefined, open: boolean) {
+type WindowField = 'operationState' | 'shutterOpen' | 'rollerShutterOpen'
+type WindowLike = { type?: string; rollerShutter?: string; shutters?: string; shutterOpen?: number; rollerShutterOpen?: number; operationState?: number }
+
+/** The part of a window a device opens: a cover its roller or side shutters (none where the model
+    has none: a blind open is not the window open), anything else (a contact sensor) the sash. */
+function windowField(node: WindowLike, cover: boolean): WindowField | null {
+  if (!cover) return 'operationState'
+  if (node.rollerShutter && node.rollerShutter !== 'none') return 'rollerShutterOpen'
+  if (node.shutters && node.shutters !== 'none') return 'shutterOpen'
+  return null
+}
+
+/**
+ * Opens or closes a Pascal door or window node the way its own interaction does, so the model
+ * moves: a door swings, a window's sash or shutters open.
+ * @param cover the device is a blind or shutter (on a window it moves the shutters, not the sash)
+ */
+export function usePascalDoor(nodeId: string | undefined, open: boolean, cover = false) {
   const first = useRef(true)
   useEffect(() => {
     if (!nodeId) return
     const store = useInteractive.getState()
     const id = nodeId as AnyNodeId
-    const from = store.doors[id]?.operationState ?? (open ? 0 : 1)
-    if (first.current && !open) {
-      first.current = false
+    const node = useScene.getState().nodes[id] as WindowLike | undefined
+    const wasFirst = first.current
+    first.current = false
+    if (node?.type === 'window') {
+      const field = windowField(node, cover)
+      if (!field) return
+      const from = store.windows[id]?.[field] ?? node[field] ?? (open ? 0 : 1)
+      if (from === (open ? 1 : 0)) return
+      store.startWindowAnimation(id, { field, from, to: open ? 1 : 0, startedAt: null, durationMs: 1100, persist: true })
       return
     }
-    first.current = false
+    const from = store.doors[id]?.operationState ?? (open ? 0 : 1)
+    if (wasFirst && !open) return
     store.startDoorAnimation(id, { field: 'operationState', from, to: open ? 1 : 0, startedAt: null, durationMs: 1100, persist: true })
-  }, [nodeId, open])
+  }, [nodeId, open, cover])
 }
 
 /** How much daylight there is outside, 0 (night) to 1 (midday), from the viewer's time of day. */
@@ -95,7 +118,7 @@ const LOCK_COLOR: Record<string, string> = { locked: ALERT.ok, unlocked: ALERT.w
 export function LockEffect({ entity, device }: FamilyProps) {
   const ring = useMemo(() => ringsMaterial(), [])
   const k = useRef(0)
-  usePascalDoor(device.nodeId, entity.state === 'open' || entity.state === 'opening')
+  usePascalDoor(device.nodeId, entity.state === 'open' || entity.state === 'opening', true)
   useFrame((st, dt) => {
     const busy = entity.state.endsWith('ing')
     k.current = approach(k.current, busy ? 1 : 0, dt, 5)

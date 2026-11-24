@@ -19,6 +19,14 @@ import { HomeNoir } from './sketch/HomeNoir'
 
 const FLOOR_Y = 0.05
 
+/** Things that control a device elsewhere: they get a pin and controls, never the device's effect
+    (a wall thermostat blows no air). */
+const QUIET_KINDS: ReadonlySet<string> = new Set(['thermostat', 'keypad', 'plug', 'sensor', 'other'])
+
+/** What the plan leaves out, as the lab has none: the ceilings over every room (the fans and lights
+    hung from them still draw), and the editor's start marker. */
+const HIDDEN_KINDS: ReadonlySet<string> = new Set(['ceiling', 'ceiling-grid', 'spawn'])
+
 /** Answers the visitor gave, kept in this browser per project and Home Assistant. */
 function useAnswers<T>(kind: string, projectId: string, hassUrl: string) {
   const key = `pascal-ha-${kind}:${projectId}:${hassUrl}`
@@ -132,11 +140,12 @@ export function useHomeLayer({ projectId, source, ready }: { projectId: string; 
       const t = l.thingId ? byId.get(l.thingId) : undefined
       if (t) {
         const anchor = anchorOf(t, l.roomId ?? t.rooms[0]?.id ?? 'home')
-        return [{ entityId: l.entityId, nodeId: t.id, anchor: { ...anchor, position: drawnCentre(source, t) } }]
+        return [{ entityId: l.entityId, nodeId: t.id, anchor: { ...anchor, position: drawnCentre(source, t) }, ...(QUIET_KINDS.has(t.kind) ? { effect: 'none' as const } : {}) }]
       }
-      // what reads its room (a thermometer), and what the plan does not draw: a pin in the room
+      // what reads its room (a thermometer): a pin in the room. A device the plan does not draw stays
+      // off the plan (the panel's Home tab), never an effect in mid-air
       const area = l.roomId ? areaById.get(l.roomId) : undefined
-      if (!area || (l.status !== 'room' && l.status !== 'missing')) return []
+      if (!area || l.status !== 'room') return []
       const [x0, z0, x1, z1] = area.bounds
       return [{ entityId: l.entityId, anchor: { position: [(x0 + x1) / 2, 1.5, (z0 + z1) / 2], rotationY: 0, mount: 'wall', area: area.id } }]
     })
@@ -186,14 +195,14 @@ export function HomeScene({ home, pins, selected, layer, onPress }: {
 }) {
   return (
     <>
-      <HomeNoir source={home.source} keep={home.kept} />
+      <HomeNoir hide={HIDDEN_KINDS} keep={home.kept} source={home.source} />
       {home.connected && <HomeEffects devices={home.devices} areas={home.areas} entities={home.entities} layer={layer} floorY={FLOOR_Y} pins={pins} selected={selected} onPress={onPress} />}
     </>
   )
 }
 
 /** Over the viewer: the connect button, the devices panel, and the questions the linking left. */
-export function HomeOverlay({ home, title, pins, selected, layer, onSelect, onLayer, onGroup }: {
+export function HomeOverlay({ home, title, pins, selected, layer, onSelect, onLayer, onGroup, itemId = null, onCloseItem }: {
   home: HomeLayer
   title: string
   pins: PinRefs
@@ -203,12 +212,11 @@ export function HomeOverlay({ home, title, pins, selected, layer, onSelect, onLa
   onLayer: (layer: FieldKind | null) => void
   /** A grouped pin was clicked: the devices under it, for the camera to zoom in on. */
   onGroup?: (entityIds: string[]) => void
+  /** An item clicked on the plan, whose links the link card shows. */
+  itemId?: string | null
+  onCloseItem?: () => void
 }) {
   const call = useHass((s) => s.call)
-  // an item picked on the plan (Pascal's own selection: a room first, then what is in it)
-  const pickedId = useViewer((s) => s.selection.selectedIds[0] ?? null)
-  const pickedType = pickedId ? (home.source.nodes as unknown as GraphNodes)[pickedId]?.type : undefined
-  const itemId = pickedType === 'item' || pickedType === 'door' || pickedType === 'window' ? pickedId : null
   return (
     <>
       {home.connected && (
@@ -218,7 +226,7 @@ export function HomeOverlay({ home, title, pins, selected, layer, onSelect, onLa
       <ConnectCard home={home} />
       {/* the cards sit where a device's controls open, so not while one is open */}
       {home.connected && !selected && itemId && (
-        <LinkCard home={home} itemId={itemId} key={itemId} onClose={() => useViewer.getState().setSelection({ selectedIds: [] })} />
+        <LinkCard home={home} itemId={itemId} key={itemId} onClose={() => onCloseItem?.()} />
       )}
       {home.connected && !selected && !itemId && home.questions.length > 0 && <QuestionCard home={home} />}
     </>

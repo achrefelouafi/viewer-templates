@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { AirflowEffect } from './effects/AirflowEffect'
 import { FieldEffect, type FieldInput } from './effects/FieldEffect'
 import { NoiseEffect } from './effects/NoiseEffect'
+import { PascalItemSync } from './effects/PascalItemSync'
 import { LightEffect } from './effects/LightEffect'
 import { CameraEffect, MediaEffect, NetworkEffect, VoiceEffect } from './effects/MediaEffects'
 import { RotorEffect } from './effects/RotorEffect'
@@ -59,13 +60,27 @@ export function HomeEffects({ devices, areas, indoor = areas, entities, layer, f
   const noise = layer === 'sound_pressure'
   const fields = useMemo(() => areas.map((area) => ({ area, input: fieldInput(area, noise ? null : layer, devices, entities) })), [areas, layer, noise, devices, entities])
   const indoorIds = useMemo(() => new Set(indoor.map((a) => a.id)), [indoor])
+  // one entity drives each model's own controls (two would fight over its switch): a fan before
+  // the light on it, as the blades are what the model animates
+  const drivers = useMemo(() => {
+    const by = new Map<string, string>()
+    for (const d of devices) {
+      if (!d.nodeId) continue
+      const had = by.get(d.nodeId)
+      if (!had || (domainOf(had) === 'light' && domainOf(d.entityId) !== 'light')) by.set(d.nodeId, d.entityId)
+    }
+    return new Set(by.values())
+  }, [devices])
   return (
     <>
       {devices.map((d) => {
         const e = entities[d.entityId]
         if (!e) return null
         const p = { entity: e, device: d, entities, floorY }
-        return <Fragment key={d.entityId}>{(() => { switch (familyOf(e)) {
+        return <Fragment key={d.entityId}>
+          {/* the linked model's own animation and lights (a fan's blades, a lamp's bulb), as the device is */}
+          {d.nodeId && drivers.has(d.entityId) && <PascalItemSync nodeId={d.nodeId} entity={e} />}
+          {(() => { switch (d.effect ?? familyOf(e)) {
           case 'light': return <LightEffect entity={e} anchor={d.anchor} floorY={floorY} />
           case 'airflow': return <AirflowEffect entity={e} anchor={d.anchor} />
           case 'rotor': return <RotorEffect entity={e} anchor={d.anchor} floorY={floorY} />
@@ -92,7 +107,8 @@ export function HomeEffects({ devices, areas, indoor = areas, entities, layer, f
           case 'signal': return <SignalEffect {...p} devices={devices} />
           case 'doorbell': return <DoorbellEffect {...p} />
           default: return null
-        } })()}</Fragment>
+        } })()}
+        </Fragment>
       })}
       {/* the weather has no place of its own: it sets the sky and falls over the grounds */}
       {Object.values(entities).filter((e) => e.entity_id.startsWith('weather.')).slice(0, 1).map((e) => (
@@ -162,7 +178,10 @@ function PinTracker({ devices, pins, selected }: { devices: HomeDevice[]; pins: 
       v.project(camera)
       const x = (v.x * 0.5 + 0.5) * size.width
       const y = (-v.y * 0.5 + 0.5) * size.height
-      el.style.transform = `translate3d(${x}px,${y}px,0) translate(-50%,-50%)`
+      // `translate`, not `transform`: the hover's `scale` then grows the pin about its own centre.
+      // (Applied after a transform, it scaled the pin's place on screen too, and the pin jumped out
+      // from under the pointer.)
+      el.style.translate = `calc(${x}px - 50%) calc(${y}px - 50%)`
       if (v.z > 1) {
         el.style.visibility = 'hidden'
         continue

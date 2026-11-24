@@ -27,7 +27,8 @@ export function wantsOf(e: EntityInfo): Wants {
     return { place: 'thing', kinds: [...first, ...kinds.filter((k) => k !== named)], also: also.filter((k) => k !== named), named: first.length > 0 }
   }
   switch (domainOf(e.entity_id)) {
-    case 'light': return pick(['light'], ['ceiling-fan', 'fan'])
+    // a light goes on a fan only when it is the fan's own ("Ceiling fan light"), never for want of a lamp
+    case 'light': return /\bfans?\b|ventilateur/.test(words(`${e.name} ${e.entity_id.replace(/[._]/g, ' ')}`).join(' ')) ? pick(['ceiling-fan', 'fan', 'light']) : pick(['light'])
     case 'climate': return pick(['ac', 'heater', 'thermostat'], ['fan'])
     case 'fan': return pick(['fan', 'ceiling-fan', 'purifier'])
     case 'humidifier': return pick(['humidifier', 'purifier'])

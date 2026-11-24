@@ -22,6 +22,9 @@ export type GraphNode = {
   start?: [number, number]
   end?: [number, number]
   wallId?: string
+  /** A door's or window's opening, in metres. */
+  width?: number
+  height?: number
 }
 export type GraphNodes = Record<string, GraphNode | undefined>
 
@@ -189,6 +192,12 @@ export function readThings(nodes: GraphNodes, options: ReadOptions = {}): { thin
       const off = offWall(wall, x, z)
       if (node.type === 'door' || node.type === 'window') {
         rooms = [...new Map(sides.flatMap((s) => s.rooms).map((r) => [r.id, r])).values()]
+        // it faces into a room: what comes through it (daylight past a blind) falls indoors
+        const inward = sides.find((s) => s.rooms.length)
+        if (inward) {
+          facing = turnFacing(inward.n[0], inward.n[1])
+          facingFrom = 'wall'
+        }
       } else {
         const face = off
           ? sides[off[0] * left[0] + off[1] * left[1] > 0 ? 0 : 1]!
@@ -211,7 +220,8 @@ export function readThings(nodes: GraphNodes, options: ReadOptions = {}): { thin
       facing = turnFacing(c * fx + s * fz, -s * fx + c * fz)
       facingFrom = 'model'
     }
-    const d = node.asset?.dimensions
+    // a door or window has its opening's size; an item, its catalog model's
+    const d: V3 | undefined = node.asset?.dimensions ?? (node.width && node.height ? [node.width, node.height, 0.1] : undefined)
     const k = node.scale ?? [1, 1, 1]
     found.push({
       ...kind, id: node.id, type: node.type, label: node.name || node.asset?.name || (node.type === 'door' ? 'Door' : node.type === 'window' ? 'Window' : node.id), mount, levelId, rooms, position, facing, facingFrom, near: [],
