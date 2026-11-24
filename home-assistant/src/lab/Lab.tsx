@@ -117,7 +117,8 @@ function LabStage({ onSceneReady }: { onSceneReady: (ready: boolean) => void }) 
 
   return (
     <>
-      <Viewer defaultRender={{ shading: 'rendered' }} onSceneReadyChange={onSceneReady} renderContext="viewer" sceneReadyKey="lab" selectionManager="custom" useBvh={false}>
+      {/* as the guided tour: no daylight sky, so its Noir or paper theme and light rig show */}
+      <Viewer daylight={false} defaultRender={{ shading: 'rendered' }} onSceneReadyChange={onSceneReady} renderContext="viewer" sceneReadyKey="lab" selectionManager="custom" useBvh={false}>
         {/* as on the project viewer, so the lab's sky and grounds match it */}
         <SceneEnvironment />
         <CameraRig device={device} group={group} />
