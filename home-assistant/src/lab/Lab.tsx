@@ -10,7 +10,7 @@ import { type FieldKind, type HomeDevice } from '../home/entities'
 import { livePosition } from '../home/effects/common'
 import { HomeEffects } from '../home/HomeEffects'
 import { HomePanel } from '../home/HomePanel'
-import { HomeSketch } from '../home/sketch/HomeSketch'
+import { HomeNoir } from '../home/sketch/HomeNoir'
 import { ThemeSwitch } from '../home/sketch/ThemeSwitch'
 import { createHomeSimulator } from '../home/simulator'
 import { prepareSceneRuntime } from '../runtime/bootstrap'
@@ -130,8 +130,8 @@ function LabStage({ onSceneReady }: { onSceneReady: (ready: boolean) => void }) 
         ))}
         {/* swings the front door when the lock opens it or its contact sensor reads open */}
         <InteractiveSystem />
-        {/* everything as a plan in ink but what Home Assistant drives */}
-        <HomeSketch source={source} keep={CONNECTED} />
+        {/* the guided tour's wireframe over everything but what Home Assistant drives */}
+        <HomeNoir source={source} keep={CONNECTED} />
         <HomeEffects devices={LAB_DEVICES} areas={AREAS} indoor={INDOOR} entities={entities} layer={layer} floorY={FLOOR_Y} pins={pins} selected={selected} onPress={press} />
       </Viewer>
 
