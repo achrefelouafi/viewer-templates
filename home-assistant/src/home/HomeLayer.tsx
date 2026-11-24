@@ -140,7 +140,7 @@ export function useHomeLayer({ projectId, source, ready }: { projectId: string; 
       const t = l.thingId ? byId.get(l.thingId) : undefined
       if (t) {
         const anchor = anchorOf(t, l.roomId ?? t.rooms[0]?.id ?? 'home')
-        return [{ entityId: l.entityId, nodeId: t.id, anchor: { ...anchor, position: drawnCentre(source, t) }, ...(QUIET_KINDS.has(t.kind) ? { effect: 'none' as const } : {}) }]
+        return [{ entityId: l.entityId, nodeId: t.id, anchor: { ...anchor, position: drawnCentre(source, t) }, ...(QUIET_KINDS.has(t.kind) ? { effect: 'none' as const } : t.type === 'door' || t.type === 'window' ? { effect: 'model' as const } : {}) }]
       }
       // what reads its room (a thermometer): a pin in the room. A device the plan does not draw stays
       // off the plan (the panel's Home tab), never an effect in mid-air

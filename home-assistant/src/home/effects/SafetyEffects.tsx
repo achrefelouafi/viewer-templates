@@ -1,4 +1,12 @@
-import { useInteractive, useScene, type AnyNodeId } from '@pascal-app/core'
+import {
+  type AnyNodeId,
+  closeDoorOpenState,
+  closeWindowOpenState,
+  openDoorOpenState,
+  openWindowOpenState,
+  setWindowShuttersOpenState,
+  useScene,
+} from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
@@ -18,43 +26,28 @@ const set = (m: { uniforms: Record<string, { value: unknown }> }, k: string, v: 
   else u.value = v
 }
 
-type WindowField = 'operationState' | 'shutterOpen' | 'rollerShutterOpen'
-type WindowLike = { type?: string; rollerShutter?: string; shutters?: string; shutterOpen?: number; rollerShutterOpen?: number; operationState?: number }
-
-/** The part of a window a device opens: a cover its roller or side shutters (none where the model
-    has none: a blind open is not the window open), anything else (a contact sensor) the sash. */
-function windowField(node: WindowLike, cover: boolean): WindowField | null {
-  if (!cover) return 'operationState'
-  if (node.rollerShutter && node.rollerShutter !== 'none') return 'rollerShutterOpen'
-  if (node.shutters && node.shutters !== 'none') return 'shutterOpen'
-  return null
-}
-
 /**
- * Opens or closes a Pascal door or window node the way its own interaction does, so the model
- * moves: a door swings, a window's sash or shutters open.
- * @param cover the device is a blind or shutter (on a window it moves the shutters, not the sash)
+ * Opens or closes a Pascal door or window with the device, through Pascal's own open and close (as
+ * a click on its viewer does), so each type moves its own way: a hinged door swings, a sliding or
+ * pocket door slides, a garage door rolls up, a window opens its sash.
+ * @param cover the device is a blind or shutter: on a window it moves the shutters, not the sash
+ *   (and a window with none is left as it is: a blind open is not the window open)
  */
 export function usePascalDoor(nodeId: string | undefined, open: boolean, cover = false) {
-  const first = useRef(true)
   useEffect(() => {
     if (!nodeId) return
-    const store = useInteractive.getState()
     const id = nodeId as AnyNodeId
-    const node = useScene.getState().nodes[id] as WindowLike | undefined
-    const wasFirst = first.current
-    first.current = false
-    if (node?.type === 'window') {
-      const field = windowField(node, cover)
-      if (!field) return
-      const from = store.windows[id]?.[field] ?? node[field] ?? (open ? 0 : 1)
-      if (from === (open ? 1 : 0)) return
-      store.startWindowAnimation(id, { field, from, to: open ? 1 : 0, startedAt: null, durationMs: 1100, persist: true })
+    // not persisted: that writes the scene, which the viewer holds read-only, and the model would
+    // snap back as the write is refused. The open state stays in the viewer's own store
+    const options = { persist: false }
+    if (useScene.getState().nodes[id]?.type === 'window') {
+      if (cover) setWindowShuttersOpenState(id, open, options)
+      else if (open) openWindowOpenState(id, options)
+      else closeWindowOpenState(id, options)
       return
     }
-    const from = store.doors[id]?.operationState ?? (open ? 0 : 1)
-    if (wasFirst && !open) return
-    store.startDoorAnimation(id, { field: 'operationState', from, to: open ? 1 : 0, startedAt: null, durationMs: 1100, persist: true })
+    if (open) openDoorOpenState(id, options)
+    else closeDoorOpenState(id, options)
   }, [nodeId, open, cover])
 }
 
@@ -65,6 +58,19 @@ function useDaylight() {
 }
 
 /* ---------------- covers: blinds, curtains, shutters, garage doors ---------------- */
+
+/** Family "model", for a device linked to a Pascal door or window: the model opens and closes with
+    the device, through its own animation (a garage door rolls up, a door swings, shutters fold), and
+    nothing else is drawn. A model with no such animation is left as it is. */
+export function ModelOpening({ entity, device }: FamilyProps) {
+  const domain = entity.entity_id.split('.')[0]
+  const open = domain === 'cover' ? openness(entity) > 0
+    : domain === 'lock' ? entity.state === 'open' || entity.state === 'opening'
+    : domain === 'binary_sensor' ? tripped(entity)
+    : isOn(entity)
+  usePascalDoor(device.nodeId, open, domain === 'cover')
+  return null
+}
 
 /** Family "opening": daylight falls through the cover as far as it is open (warm by day, nothing at
     night), and its edge glows while it travels. The cover itself moves in its own model. */
@@ -118,7 +124,7 @@ const LOCK_COLOR: Record<string, string> = { locked: ALERT.ok, unlocked: ALERT.w
 export function LockEffect({ entity, device }: FamilyProps) {
   const ring = useMemo(() => ringsMaterial(), [])
   const k = useRef(0)
-  usePascalDoor(device.nodeId, entity.state === 'open' || entity.state === 'opening', true)
+  usePascalDoor(device.nodeId, entity.state === 'open' || entity.state === 'opening')
   useFrame((st, dt) => {
     const busy = entity.state.endsWith('ing')
     k.current = approach(k.current, busy ? 1 : 0, dt, 5)

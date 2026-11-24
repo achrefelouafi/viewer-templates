@@ -1,4 +1,4 @@
-import { initSpatialGridSync, sceneRegistry, useScene } from '@pascal-app/core'
+import { type AnyNodeId, initSpatialGridSync, operateItem, sceneRegistry, toggleDoorOpenState, toggleWindowOpenState, useInteractive, useScene } from '@pascal-app/core'
 import { InteractiveSystem, SceneEnvironment, useViewer, Viewer } from '@pascal-app/viewer'
 import { SceneLoader, selectViewerLevel, useViewerFloorDisplay, type ViewerSource } from '@pascal-app/viewer/ui'
 import { useThree } from '@react-three/fiber'
@@ -123,9 +123,15 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
   } as CSSProperties
   // an item clicked on the plan opens its links where a device's controls would: one card at a time
   const [itemId, setItemId] = useState<string | null>(null)
+  const kept = useRef(home.kept)
+  kept.current = home.kept
   const pickItem = useCallback((id: string | null) => {
     setItemId(id)
-    if (id) setSelected(null)
+    if (!id) return
+    setSelected(null)
+    // and it works as on Pascal's own viewer: a door swings, a window opens, a fridge or a fan runs.
+    // Not what Home Assistant drives: that follows its device (its pin switches it)
+    if (!kept.current.has(id)) operateModel(id)
   }, [])
 
   const press = useCallback((id: string) => setSelected((s) => (s === id ? s : id)), [])
@@ -174,6 +180,21 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
       <ThemeSwitch className="absolute bottom-4 left-1/2 z-30 -translate-x-1/2 sm:bottom-6" />
     </>
   )
+}
+
+/**
+ * Operates a model by Pascal's own rules, as a click on its viewer does. Not persisted: the scene
+ * is read-only here, and a persisted animation would snap back when its write is refused.
+ */
+function operateModel(id: string) {
+  const node = useScene.getState().nodes[id as AnyNodeId] as { type?: string; asset?: { interactive?: unknown } } | undefined
+  if (node?.type === 'door') return toggleDoorOpenState(id as AnyNodeId, { persist: false })
+  if (node?.type === 'window') return toggleWindowOpenState(id as AnyNodeId, { persist: false })
+  const interactive = node?.asset?.interactive as Parameters<typeof operateItem>[1] | undefined
+  if (node?.type !== 'item' || !interactive?.controls?.length) return
+  const store = useInteractive.getState()
+  if (!store.items[id as AnyNodeId]) store.initItem(id as AnyNodeId, interactive, true)
+  operateItem(id as AnyNodeId, interactive)
 }
 
 /** What a click can pick: things a device can be. */

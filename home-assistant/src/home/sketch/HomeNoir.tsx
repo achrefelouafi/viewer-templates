@@ -1,11 +1,11 @@
-import { sceneRegistry } from '@pascal-app/core'
+import { sceneRegistry, useInteractive } from '@pascal-app/core'
 import { getSceneTheme, SCENE_LAYER, SITE_GROUND, useViewer } from '@pascal-app/viewer'
 import type { ViewerSource } from '@pascal-app/viewer/ui'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { mrt, output, vec4 } from 'three/tsl'
-import { LineBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
+import { mrt, output, positionLocal, vec4 } from 'three/tsl'
+import { LineBasicNodeMaterial, MeshStandardNodeMaterial, type Node, type NodeBuilder } from 'three/webgpu'
 
 /**
  * The home as the guided tour draws it in the viewer-templates-tour project's `TourNoir`: a
@@ -573,6 +573,57 @@ function ownership(mesh: THREE.Object3D, owners: Map<THREE.Object3D, NodeOwner>,
   return graph ? 'graph' : 'outside'
 }
 
+/* ---------------- motion kept: what moves inside its own material ---------------- */
+
+/** How a material moves its vertices, when it does: a tree's wind (`windNode`, applied before
+    instancing) or a swaying grass blade (`positionNode`). */
+type Motion = { wind: Node | null; position: Node | null }
+
+function motionOf(material: THREE.Material | THREE.Material[]): Motion | null {
+  for (const m of Array.isArray(material) ? material : [material]) {
+    const moving = m as { windNode?: Node | null; positionNode?: Node | null }
+    if (moving?.windNode || moving?.positionNode) return { wind: moving.windNode ?? null, position: moving.positionNode ?? null }
+  }
+  return null
+}
+
+/** The wireframe's surface with a mesh's own motion: its leaves still flutter, its grass still sways. */
+class MovingSurface extends MeshStandardNodeMaterial {
+  wind: Node | null = null
+  setupPosition(builder: NodeBuilder): Node {
+    // as the trees plugin's WindNodeMaterial: in geometry space, before the instance transform
+    if (this.wind !== null) positionLocal.assign(this.wind)
+    return super.setupPosition(builder)
+  }
+  customProgramCacheKey(): string {
+    return `${super.customProgramCacheKey()}|wind:${this.wind ? this.wind.id : 'none'}`
+  }
+}
+
+/** The wireframe's edges with the same motion, so the outline moves with the surface. */
+class MovingLine extends LineBasicNodeMaterial {
+  wind: Node | null = null
+  setupPosition(builder: NodeBuilder): Node {
+    if (this.wind !== null) positionLocal.assign(this.wind)
+    return super.setupPosition(builder)
+  }
+  customProgramCacheKey(): string {
+    return `${super.customProgramCacheKey()}|wind:${this.wind ? this.wind.id : 'none'}`
+  }
+}
+
+/** Copies the look the palette paints (`paint` keeps the twins in step with their base). */
+function copyLook(from: THREE.Material & { color?: THREE.Color }, to: THREE.Material & { color?: THREE.Color }) {
+  to.color?.copy(from.color ?? new THREE.Color())
+  to.opacity = from.opacity
+  to.transparent = from.transparent
+  to.depthWrite = from.depthWrite
+  to.polygonOffset = from.polygonOffset
+  to.polygonOffsetFactor = from.polygonOffsetFactor
+  to.polygonOffsetUnits = from.polygonOffsetUnits
+  to.visible = from.visible
+}
+
 function createKit(palette: Palette) {
   const wall = new MeshStandardNodeMaterial({
     color: palette.wall,
@@ -617,8 +668,28 @@ function createKit(palette: Palette) {
   // light glows do), so the screen-space ink doesn't double the edges.
   for (const line of [wallEdge, itemEdge]) line.mrtNode = mrt({ output, diffuseColor: vec4(0), normal: vec4(0) })
   for (const material of [wall, item, floor, glass, ground, wallEdge, itemEdge, none]) material.userData.__tourNoir = true
+  // Moving twins of the surfaces and edges, one per motion and base material.
+  const twins = new Map<string, { base: THREE.Material; twin: THREE.Material }>()
+  const twin = (base: THREE.Material, motion: Motion): THREE.Material => {
+    const key = `${base.uuid}|${motion.wind?.id ?? '-'}|${motion.position?.id ?? '-'}`
+    const known = twins.get(key)
+    if (known) return known.twin
+    const line = base instanceof LineBasicNodeMaterial
+    const made = line ? new MovingLine() : new MovingSurface({ roughness: (base as MeshStandardNodeMaterial).roughness, metalness: 0 })
+    made.wind = motion.wind
+    if (motion.position) made.positionNode = motion.position
+    if (line) made.mrtNode = (base as LineBasicNodeMaterial).mrtNode
+    copyLook(base, made)
+    made.userData.__tourNoir = true
+    twins.set(key, { base, twin: made })
+    return made
+  }
   return {
     wall, item, floor, glass, ground, wallEdge, itemEdge, none,
+    /** The base material, or its twin that keeps a mesh's own motion. */
+    moving(base: THREE.Material, motion: Motion | null): THREE.Material {
+      return motion && base !== none ? twin(base, motion) : base
+    },
     paint(next: Palette) {
       wall.color.set(next.wall)
       wall.opacity = next.wallOpacity
@@ -632,9 +703,11 @@ function createKit(palette: Palette) {
       wallEdge.opacity = next.wallEdgeOpacity
       itemEdge.color.set(next.edge)
       itemEdge.opacity = next.itemEdgeOpacity
+      for (const { base, twin } of twins.values()) copyLook(base, twin)
     },
     dispose() {
       for (const material of [wall, item, floor, glass, ground, wallEdge, itemEdge, none]) material.dispose()
+      for (const { twin } of twins.values()) twin.dispose()
     },
   }
 }
@@ -698,6 +771,8 @@ export function HomeNoir({ source, keep, hide }: { source: ViewerSource; keep: R
   const stash = useRef({
     meshes: new Map<THREE.Mesh, MeshStash>(),
     hidden: new Map<THREE.Object3D, boolean>(),
+    /** Doors and windows in motion, and how many frames more to watch each. */
+    moving: new Map<string, number>(),
     elapsed: 0,
   })
 
@@ -734,14 +809,14 @@ export function HomeNoir({ source, keep, hide }: { source: ViewerSource; keep: R
     invalidate()
   }, [kit, palette, invalidate])
 
-  const addEdges = (mesh: THREE.Mesh, role: NoirRole): THREE.LineSegments | null => {
+  const addEdges = (mesh: THREE.Mesh, role: NoirRole, motion: Motion | null): THREE.LineSegments | null => {
     if (role !== 'wall' && role !== 'item') return null
     const edges = flatEdges(mesh.geometry, EDGE_THRESHOLD_DEG)
     if (!edges.getAttribute('position')?.count) {
       edges.dispose()
       return null
     }
-    const line = new THREE.LineSegments(edges, role === 'wall' ? kit.wallEdge : kit.itemEdge)
+    const line = new THREE.LineSegments(edges, kit.moving(role === 'wall' ? kit.wallEdge : kit.itemEdge, motion))
     line.raycast = NO_RAYCAST
     line.userData = { __tourNoir: true }
     line.layers.mask = mesh.layers.mask
@@ -749,11 +824,17 @@ export function HomeNoir({ source, keep, hide }: { source: ViewerSource; keep: R
     return line
   }
 
-  const scan = () => {
+  /** Restyles what is new under `roots` (the whole scene by default). */
+  const scan = (roots: THREE.Object3D[] = [scene]) => {
     const nodes = liveSource.current.nodes as unknown as Record<string, NodeLike | undefined>
     const owners = buildLiveOwnerMap(nodes)
     const { meshes, hidden } = stash.current
-    scene.traverse((obj) => {
+    if (roots.length === 1 && roots[0] === scene) {
+      // Meshes Pascal threw away (a moving door is rebuilt every frame) are let go. One it only took
+      // out for a moment keeps its surface (pinned) and edges, and is simply not tracked again.
+      for (const mesh of [...meshes.keys()]) if (!mesh.parent) meshes.delete(mesh)
+    }
+    for (const root of roots) root.traverse((obj) => {
       if (isUnderTourNoir(obj)) return
       if (isSiteEnvironmentObject(obj, owners)) {
         // The site's boundary line goes. The ground stays, in the theme's ground colour: hiding it
@@ -785,7 +866,7 @@ export function HomeNoir({ source, keep, hide }: { source: ViewerSource; keep: R
           // Rebuilt geometry: its edges are drawn again.
           known.edge?.removeFromParent()
           known.edge?.geometry.dispose()
-          known.edge = addEdges(mesh, known.role)
+          known.edge = addEdges(mesh, known.role, motionOf(known.material))
           known.geometryUuid = mesh.geometry.uuid
         }
         return
@@ -799,16 +880,18 @@ export function HomeNoir({ source, keep, hide }: { source: ViewerSource; keep: R
       const classified = kind && hide?.has(kind) ? { role: 'none' as const } : classifyMesh(mesh, owners)
       if (!classified) return
       const { role } = classified
+      // what moves inside its own material (a tree in the wind) keeps moving in the wireframe
+      const motion = motionOf(mesh.material)
       const saved: MeshStash = {
         material: mesh.material,
         castShadow: mesh.castShadow,
         receiveShadow: mesh.receiveShadow,
         role,
         geometryUuid: mesh.geometry.uuid,
-        edge: addEdges(mesh, role),
+        edge: addEdges(mesh, role, motion),
       }
       meshes.set(mesh, saved)
-      pinMaterial(mesh, surfaceFor(kit, role), saved)
+      pinMaterial(mesh, kit.moving(surfaceFor(kit, role), motion), saved)
       mesh.castShadow = false
       mesh.receiveShadow = role === 'floor'
     })
@@ -887,7 +970,26 @@ export function HomeNoir({ source, keep, hide }: { source: ViewerSource; keep: R
     if (state.elapsed >= RESCAN_INTERVAL_S) {
       state.elapsed = 0
       scan()
+      return
     }
+    // A door or window in motion is rebuilt as new meshes every frame: restyle it every frame, or
+    // it would move in its own colours and snap to the wireframe only when it stops.
+    // Pascal draws a frame before it rebuilds what moves, so this (run before the draw) styles the
+    // last frame's rebuild. It keeps watching a few frames after the motion ends, for the rebuild
+    // of the pose it comes to rest in.
+    const { doorAnimations, windowAnimations, skylightAnimations } = useInteractive.getState()
+    for (const id of [...Object.keys(doorAnimations), ...Object.keys(windowAnimations), ...Object.keys(skylightAnimations)]) state.moving.set(id, 6)
+    const moving: THREE.Object3D[] = []
+    for (const [id, left] of state.moving) {
+      if (left <= 0) {
+        state.moving.delete(id)
+        continue
+      }
+      state.moving.set(id, left - 1)
+      const obj = sceneRegistry.nodes.get(id as never)
+      if (obj) moving.push(obj)
+    }
+    if (moving.length) scan(moving)
   })
 
   return null

@@ -25,6 +25,8 @@ export type EffectFamily =
   | 'opening' | 'lock' | 'contact' | 'smoke' | 'leak' | 'motion' | 'siren' | 'alarm'
   | 'media' | 'camera' | 'robot' | 'energy' | 'heater' | 'water' | 'network' | 'voice'
   | 'mist' | 'presence' | 'alert' | 'status' | 'signal' | 'doorbell'
+  /** On a Pascal door or window: the model opens as its own animation does, and nothing is drawn. */
+  | 'model'
   | 'none'
 
 const SMOKE_CLASSES = ['smoke', 'gas', 'carbon_monoxide', 'heat']

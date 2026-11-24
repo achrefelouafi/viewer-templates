@@ -8,7 +8,7 @@ import { PascalItemSync } from './effects/PascalItemSync'
 import { LightEffect } from './effects/LightEffect'
 import { CameraEffect, MediaEffect, NetworkEffect, VoiceEffect } from './effects/MediaEffects'
 import { RotorEffect } from './effects/RotorEffect'
-import { AlarmEffect, ContactEffect, LeakEffect, LockEffect, MotionEffect, OpeningEffect, SirenEffect, SmokeEffect } from './effects/SafetyEffects'
+import { AlarmEffect, ContactEffect, LeakEffect, LockEffect, ModelOpening, MotionEffect, OpeningEffect, SirenEffect, SmokeEffect } from './effects/SafetyEffects'
 import { EnergyEffect, HeaterEffect, RobotEffect, WaterEffect } from './effects/UtilityEffects'
 import { livePosition } from './effects/common'
 import { AlertEffect, DoorbellEffect, MistEffect, PresenceEffect, SignalEffect, StatusEffect, WeatherEffect } from './effects/PeopleEffects'
@@ -85,6 +85,7 @@ export function HomeEffects({ devices, areas, indoor = areas, entities, layer, f
           case 'airflow': return <AirflowEffect entity={e} anchor={d.anchor} />
           case 'rotor': return <RotorEffect entity={e} anchor={d.anchor} floorY={floorY} />
           case 'opening': return <OpeningEffect {...p} />
+          case 'model': return <ModelOpening {...p} />
           case 'lock': return <LockEffect {...p} />
           case 'contact': return <ContactEffect {...p} />
           case 'smoke': return <SmokeEffect {...p} />
