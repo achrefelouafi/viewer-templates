@@ -284,7 +284,7 @@ function ConnectCard({ home }: { home: HomeLayer }) {
 }
 
 /** A card on the right, where a device's controls open. */
-const CARD = 'pointer-events-auto absolute top-4 right-4 z-30 grid w-[min(20rem,calc(100vw-2rem))] gap-3 rounded-2xl border border-border/60 bg-background/95 p-4 text-sm shadow-lg backdrop-blur'
+const CARD = 'pointer-events-auto absolute top-[var(--card-top,1rem)] right-[var(--card-right,1rem)] z-30 grid w-[min(20rem,calc(100vw-2rem))] gap-3 rounded-2xl border border-border/60 bg-background/95 p-4 text-sm shadow-lg backdrop-blur'
 const ROW = 'flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left hover:bg-foreground/8'
 
 /** Lights up a thing on the plan while a choice is pointed at, as Pascal's own hover does. */

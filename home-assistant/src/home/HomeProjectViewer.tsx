@@ -2,7 +2,7 @@ import { initSpatialGridSync, sceneRegistry, useScene } from '@pascal-app/core'
 import { InteractiveSystem, SceneEnvironment, useViewer, Viewer } from '@pascal-app/viewer'
 import { SceneLoader, selectViewerLevel, useViewerFloorDisplay, type ViewerSource } from '@pascal-app/viewer/ui'
 import { useThree } from '@react-three/fiber'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type { SceneResponse } from '../pascal'
 import { pluginInstallStateOf, publishedSceneSetup } from '../runtime/plugins'
@@ -10,7 +10,8 @@ import { CameraRig, type CameraView } from './CameraRig'
 import type { Area, FieldKind } from './entities'
 import { livePosition } from './effects/common'
 import { HomeOverlay, HomeScene, useHomeLayer } from './HomeLayer'
-import { LevelPicker } from './LevelPicker'
+import { ExplorePanel, useSceneLevels } from './explore/ExplorePanel'
+import { useIsCompact } from './explore/useIsCompact'
 import { ThemeSwitch } from './sketch/ThemeSwitch'
 
 /* A Pascal project as the effects lab shows its home (src/lab/Lab.tsx), with the visitor's own
@@ -66,14 +67,15 @@ export function HomeProjectViewer({ scene, runtimeRevision }: { scene: SceneResp
 
   return (
     <main className="relative h-full overflow-hidden" data-state={sceneReady ? 'ready' : 'loading'}>
-      {mounted && <HomeStage projectId={project.id} title={project.name || 'Home'} sceneReady={sceneReady} onSceneReady={setSceneReady} sceneKey={`${project.id}:${runtimeRevision}`} />}
+      {mounted && <HomeStage ownerName={project.owner?.displayName ?? null} projectId={project.id} title={project.name || 'Home'} sceneReady={sceneReady} onSceneReady={setSceneReady} sceneKey={`${project.id}:${runtimeRevision}`} />}
       {!sceneReady && <SceneLoader className="bg-background" fullScreen />}
     </main>
   )
 }
 
-function HomeStage({ projectId, title, sceneReady, onSceneReady, sceneKey }: {
+function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, sceneKey }: {
   projectId: string
+  ownerName: string | null
   title: string
   sceneReady: boolean
   onSceneReady: (ready: boolean) => void
@@ -97,6 +99,28 @@ function HomeStage({ projectId, title, sceneReady, onSceneReady, sceneKey }: {
     const roomed = levels.find((l) => Object.values(nodes).some((n) => n?.type === 'zone' && n.parentId === l.id))
     if (levels.length > 1 && roomed) selectViewerLevel(roomed.id, source)
   }, [sceneReady, nodes, source])
+  // the tour viewer's explore panel on the right: links to Pascal, the project, its floors, plan and rooms
+  const levels = useSceneLevels(source)
+  const compact = useIsCompact()
+  const [exploreOpen, setExploreOpen] = useState(true)
+  const [mobileExploreOpen, setMobileExploreOpen] = useState(false)
+  useEffect(() => {
+    // E opens or folds it, as in the tour viewer
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'e' || e.metaKey || e.ctrlKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t?.closest('input, textarea, select, [contenteditable="true"]')) return
+      if (compact) setMobileExploreOpen((v) => !v)
+      else setExploreOpen((v) => !v)
+    }
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [compact])
+  // the device controls and the link cards open beside the panel, never under it
+  const cardPlace = {
+    '--card-top': compact ? '4.25rem' : exploreOpen ? '1rem' : '4.75rem',
+    '--card-right': compact || !exploreOpen ? '1rem' : '20rem',
+  } as CSSProperties
   // an item clicked on the plan opens its links where a device's controls would: one card at a time
   const [itemId, setItemId] = useState<string | null>(null)
   const pickItem = useCallback((id: string | null) => {
@@ -136,11 +160,15 @@ function HomeStage({ projectId, title, sceneReady, onSceneReady, sceneKey }: {
         <HomeScene home={home} layer={layer} onPress={press} pins={pins} selected={selected} />
       </Viewer>
 
+      <div className="contents" style={cardPlace}>
       <HomeOverlay home={home} itemId={itemId} layer={layer} onCloseItem={() => setItemId(null)} onGroup={zoomTo} onLayer={setLayer} onSelect={select} pins={pins}
         selected={selected} title={title} />
 
-      {/* the floors, as on the default viewer: the whole building or one floor alone */}
-      <LevelPicker className="absolute right-4 bottom-4 z-30 sm:bottom-6" source={source} />
+      </div>
+
+      {/* the tour viewer's explore panel: Pascal's links, the project, its floors, live plan and rooms */}
+      <ExplorePanel compact={compact} embed={false} levels={levels} mobileOpen={mobileExploreOpen} onMobileOpenChange={setMobileExploreOpen}
+        onOpenChange={setExploreOpen} open={exploreOpen} ownerName={ownerName} projectName={title} source={source} />
 
       {/* light or dark, as in the lab */}
       <ThemeSwitch className="absolute bottom-4 left-1/2 z-30 -translate-x-1/2 sm:bottom-6" />

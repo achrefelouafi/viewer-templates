@@ -1058,7 +1058,7 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
 
       {/* the selected device's card */}
       {sel && (
-        <section key={sel.entity_id} aria-label={`${nameOf(sel)} controls`} className="pointer-events-auto absolute top-4 right-4 flex w-80 flex-col gap-4 rounded-2xl border border-border/60 bg-background/90 p-4 shadow-lg backdrop-blur">
+        <section key={sel.entity_id} aria-label={`${nameOf(sel)} controls`} className="pointer-events-auto absolute top-[var(--card-top,1rem)] right-[var(--card-right,1rem)] flex w-80 flex-col gap-4 rounded-2xl border border-border/60 bg-background/90 p-4 shadow-lg backdrop-blur">
           <header className="flex items-center gap-3">
             <button type="button" onClick={() => onSelect(null)} aria-label="Back to all devices" className="grid size-8 place-items-center rounded-full hover:bg-foreground/5">
               <Svg><path d="m15 18-6-6 6-6" /></Svg>
