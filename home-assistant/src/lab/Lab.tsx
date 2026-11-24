@@ -1,5 +1,5 @@
 import { initSpatialGridSync, sceneRegistry, useScene } from '@pascal-app/core'
-import { InteractiveSystem, SceneEnvironment, useViewer, Viewer, type TimeOfDay } from '@pascal-app/viewer'
+import { InteractiveSystem, SceneEnvironment, useViewer, Viewer } from '@pascal-app/viewer'
 import { SceneLoader, type ViewerSource } from '@pascal-app/viewer/ui'
 import { OrbitControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
@@ -13,7 +13,6 @@ import { HomePanel } from '../home/HomePanel'
 import { HomeSketch } from '../home/sketch/HomeSketch'
 import { ThemeSwitch } from '../home/sketch/ThemeSwitch'
 import { createHomeSimulator } from '../home/simulator'
-import { isDark } from '../theme'
 import { prepareSceneRuntime } from '../runtime/bootstrap'
 import { publishedSceneSetup } from '../runtime/plugins'
 import { AREAS, FLOOR_Y, INDOOR, LAB_AIR, LAB_AREA_OF, LAB_DEVICES, LAB_ENTITIES, LAB_GRAPH, LAB_SCENERY } from './labHome'
@@ -23,23 +22,6 @@ import { LabBody, Panel } from './LabBodies'
    Pascal viewer, with every device family placed by hand and driven by a simulated Home Assistant.
    It is where effects are made and tuned before they attach to a real project's items. */
 
-type WallMode = 'up' | 'cutaway' | 'down'
-const TIMES: { v: TimeOfDay; t: string }[] = [
-  { v: 'midday', t: 'Day' },
-  { v: 'golden', t: 'Golden' },
-  { v: 'blue', t: 'Dusk' },
-  { v: 'night', t: 'Night' },
-]
-const WALLS: { v: WallMode; t: string }[] = [
-  { v: 'up', t: 'Up' },
-  { v: 'cutaway', t: 'Cutaway' },
-  { v: 'down', t: 'Down' },
-]
-type Look = 'plan' | 'render'
-const LOOKS: { v: Look; t: string }[] = [
-  { v: 'plan', t: 'Plan' },
-  { v: 'render', t: 'Render' },
-]
 /** The Pascal nodes a Home Assistant device drives (a door its lock opens): kept in colour on the plan. */
 const CONNECTED: ReadonlySet<string> = new Set(LAB_DEVICES.flatMap((d) => (d.nodeId ? [d.nodeId] : [])))
 const HOME_VIEW = { position: new THREE.Vector3(13, 15, 19), target: new THREE.Vector3(2, 0.4, 2) }
@@ -65,10 +47,11 @@ export default function Lab() {
         viewer.resetSelection()
         viewer.setCameraMode('perspective')
         viewer.setLevelMode('stacked')
-        viewer.setWallMode('cutaway')
+        // the guided tour's settings: walls up and midday light; light or dark only swaps the ink
+        viewer.setWallMode('up')
         viewer.setShowGrid(false)
         viewer.setShowMeasurements(false)
-        viewer.setTimeOfDay(isDark() ? 'night' : 'midday')
+        viewer.setTimeOfDay('midday')
         setReady(true)
       })
       .catch((failure: unknown) => {
@@ -99,23 +82,11 @@ function LabStage({ onSceneReady }: { onSceneReady: (ready: boolean) => void }) 
   const [selected, setSelected] = useState<string | null>(null)
   const [layer, setLayer] = useState<FieldKind | null>('temperature')
   const pins = useRef<Record<string, HTMLElement | null>>({})
-  const timeOfDay = useViewer((s) => s.timeOfDay)
   const notice = useHome((s) => s.notice)
-  // the rooms' light level follows the daylight outside
-  useEffect(() => {
-    useHome.getState().setDaylight(timeOfDay === 'midday' ? 1 : timeOfDay === 'golden' ? 0.6 : timeOfDay === 'blue' ? 0.15 : 0.02)
-  }, [timeOfDay, useHome])
-  const wallMode = useViewer((s) => s.wallMode)
-  const [look, setLook] = useState<Look>('plan')
+  // the lab stays at midday, as the tour does: full daylight in the rooms
+  useEffect(() => useHome.getState().setDaylight(1), [useHome])
   const nodes = useScene((s) => s.nodes)
   const source = useMemo<ViewerSource>(() => ({ nodes, objectFor: (id) => sceneRegistry.nodes.get(id) }), [nodes])
-
-  // light or dark: the plan's paper or noir, and the daylight that goes with it
-  useEffect(() => {
-    const follow = () => useViewer.getState().setTimeOfDay(isDark() ? 'night' : 'midday')
-    addEventListener('pascal-theme', follow)
-    return () => removeEventListener('pascal-theme', follow)
-  }, [])
 
   // development builds only: the simulated Home Assistant on `window.__home`, for testing from the console
   useEffect(() => {
@@ -160,37 +131,16 @@ function LabStage({ onSceneReady }: { onSceneReady: (ready: boolean) => void }) 
         {/* swings the front door when the lock opens it or its contact sensor reads open */}
         <InteractiveSystem />
         {/* everything as a plan in ink but what Home Assistant drives */}
-        <HomeSketch source={source} keep={CONNECTED} active={look === 'plan'} />
+        <HomeSketch source={source} keep={CONNECTED} />
         <HomeEffects devices={LAB_DEVICES} areas={AREAS} indoor={INDOOR} entities={entities} layer={layer} floorY={FLOOR_Y} pins={pins} selected={selected} onPress={press} />
       </Viewer>
 
       <HomePanel title="Effects lab" devices={LAB_DEVICES} areas={AREAS} entities={entities} selected={selected} lastCall={lastCall} notice={notice} layer={layer} pins={pins}
         onSelect={select} onGroup={zoomTo} call={callService} onLayer={setLayer} />
 
-      <div className="pointer-events-auto absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 rounded-full border border-border/60 bg-background/90 px-3 py-2 text-xs shadow-lg backdrop-blur">
-        <Pick label="View" value={look} options={LOOKS} onPick={setLook} />
-        <span className="h-4 w-px bg-border" />
-        <Pick label="Light" value={timeOfDay} options={TIMES} onPick={(v) => useViewer.getState().setTimeOfDay(v)} />
-        <span className="h-4 w-px bg-border" />
-        <Pick label="Walls" value={wallMode as WallMode} options={WALLS} onPick={(v) => useViewer.getState().setWallMode(v)} />
-        <span className="h-4 w-px bg-border" />
-        <ThemeSwitch className="h-9 border-0 bg-transparent shadow-none backdrop-blur-none" />
-      </div>
+      {/* the lab's only control, as in the guided tour: light or dark */}
+      <ThemeSwitch className="absolute bottom-4 left-1/2 z-30 -translate-x-1/2 sm:bottom-6" />
     </>
-  )
-}
-
-function Pick<T extends string>({ label, value, options, onPick }: { label: string; value: T; options: { v: T; t: string }[]; onPick: (v: T) => void }) {
-  return (
-    <div className="flex items-center gap-1.5" role="radiogroup" aria-label={label}>
-      <span className="px-1 text-muted-foreground">{label}</span>
-      {options.map((o) => (
-        <button key={o.v} type="button" role="radio" aria-checked={o.v === value} onClick={() => onPick(o.v)}
-          className={`rounded-full px-2.5 py-1 ${o.v === value ? 'bg-foreground text-background' : 'hover:bg-foreground/5'}`}>
-          {o.t}
-        </button>
-      ))}
-    </div>
   )
 }
 

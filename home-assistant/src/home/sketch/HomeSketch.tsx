@@ -109,6 +109,8 @@ function graphLines(levelId: string, nodes: Readonly<Record<string, Node>>, keep
   }
 }
 
+const centre = new Vector3()
+const size = new Vector3()
 const inverse = new Matrix4()
 const a = new Vector3()
 const b = new Vector3()
@@ -261,12 +263,7 @@ export function HomeSketch({ source, keep, active = true }: { source: ViewerSour
       }
       s.house = house
       root.add(house.root)
-      const centre = house.extent.getCenter(new Vector3())
-      const size = house.extent.getSize(new Vector3())
-      ink.draftCentre.value.set(centre.x, centre.z)
-      ink.houseCentre.value.set(centre.x, centre.z)
       ink.roomOn.value = 0
-      s.reach = Math.max(4, Math.hypot(size.x, size.z) / 2 + 2)
       s.draft = 0
       ink.lines.value = 1
     }
@@ -279,6 +276,13 @@ export function HomeSketch({ source, keep, active = true }: { source: ViewerSour
       return
     }
     house.sync()
+    // The house's middle and reach, from everything copied so far: the viewer keeps adding meshes
+    // after the first frame, and the outlines draft out across all of them.
+    house.extent.getCenter(centre)
+    house.extent.getSize(size)
+    ink.draftCentre.value.set(centre.x, centre.z)
+    ink.houseCentre.value.set(centre.x, centre.z)
+    s.reach = Math.max(4, Math.hypot(size.x, size.z) / 2 + 2)
 
     let busy = false
     if (on && s.house01 > 0) {
