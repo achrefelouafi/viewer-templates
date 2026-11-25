@@ -136,7 +136,7 @@ function LabStage({ onSceneReady }: { onSceneReady: (ready: boolean) => void }) 
       </Viewer>
 
       <HomePanel title="Effects lab" devices={LAB_DEVICES} areas={AREAS} entities={entities} selected={selected} lastCall={lastCall} notice={notice} layer={layer} pins={pins}
-        onSelect={select} onGroup={zoomTo} call={callService} onLayer={setLayer} />
+        onSelect={select} onGroup={zoomTo} call={callService} onLayer={setLayer} isLab />
 
       {/* the lab's only control, as in the guided tour: light or dark */}
       <ThemeSwitch className="absolute bottom-4 left-1/2 z-30 -translate-x-1/2 sm:bottom-6" />

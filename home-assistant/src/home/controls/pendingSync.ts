@@ -1,6 +1,7 @@
 /* Ported from home-assistant/frontend (Apache-2.0):
    - src/common/util/pending-value-sync.ts
-   - src/common/util/debounce.ts */
+   - src/common/util/debounce.ts
+   - src/common/util/throttle.ts */
 
 /**
  * Keeps a locally edited value from being overwritten by entity state updates
@@ -70,4 +71,58 @@ export function createDebounce<T extends unknown[]>(
     }
   }
   return debounced
+}
+
+export type ThrottledFn<T extends unknown[]> = ((...args: T) => void) & {
+  cancel: () => void
+}
+
+export function createThrottle<T extends unknown[]>(
+  fn: (...args: T) => void,
+  waitMs: number,
+  leading = true,
+  trailing = true,
+): ThrottledFn<T> {
+  let timer: number | undefined
+  let previous = 0
+  let pendingArgs: T | undefined
+
+  const later = () => {
+    previous = leading === false ? 0 : Date.now()
+    timer = undefined
+    const args = pendingArgs
+    pendingArgs = undefined
+    if (args) fn(...args)
+  }
+
+  const throttled = (...args: T): void => {
+    const now = Date.now()
+    if (!previous && leading === false) previous = now
+    const remaining = waitMs - (now - previous)
+    if (remaining <= 0 || remaining > waitMs) {
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+        timer = undefined
+      }
+      previous = now
+      pendingArgs = undefined
+      fn(...args)
+    } else if (trailing !== false) {
+      pendingArgs = args
+      if (timer === undefined) {
+        timer = window.setTimeout(later, remaining)
+      }
+    }
+  }
+
+  throttled.cancel = () => {
+    if (timer !== undefined) {
+      window.clearTimeout(timer)
+      timer = undefined
+    }
+    previous = 0
+    pendingArgs = undefined
+  }
+
+  return throttled
 }

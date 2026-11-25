@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { hs2rgb, rgbw2rgb, rgbww2rgb } from './controls/colorMath'
 import { addDb, climateStrength, domainOf, noiseOf, QUIET_DB, fieldOf, FIELDS, hvacAction, isOn, tripped, type HassEntities, type HassEntity, type ServiceCall } from './entities'
 
 /* A stand-in Home Assistant for the effects lab: it keeps entities in Home Assistant's shapes,
@@ -66,7 +67,8 @@ export function createHomeSimulator(start: HassEntities, areaOf: Record<string, 
       const next = apply(old, domain, svc, data, lastHvac, timers)
       if (domainOf(id) === 'climate' && next.state !== 'off') lastHvac[id] = next.state
       put(next, old)
-      set({ lastCall: { domain, service, data, source } })
+      const { code: _redacted, ...safeData } = data
+      set({ lastCall: { domain, service, data: safeData as ServiceCall['data'], source } })
       knockOn(domain, svc, data, next)
     }
 
@@ -168,11 +170,22 @@ export function createHomeSimulator(start: HassEntities, areaOf: Record<string, 
               const moving = p !== target
               change(e, { state: moving ? (target > pos ? 'opening' : 'closing') : p === 0 ? 'closed' : 'open', attributes: { current_position: Math.round(p * 10) / 10 } })
             }
+            if (d === 'cover' && e.attributes._tilt_target !== undefined) {
+              const tTarget = Number(e.attributes._tilt_target)
+              const tilt = Number(e.attributes.current_tilt_position ?? 0)
+              if (tilt !== tTarget) {
+                const nextTilt = toward(tilt, tTarget, TRAVEL.valve * dt)
+                change(next[id]!, { attributes: { current_tilt_position: Math.round(nextTilt) } })
+              }
+            }
           }
           if (d === 'lock' && done) change(e, { state: e.state === 'locking' ? 'locked' : e.state === 'unlocking' ? 'unlocked' : e.state === 'opening' ? 'open' : e.state })
           if (d === 'alarm_control_panel' && done) {
             if (e.state === 'arming') change(e, { state: String(e.attributes._arm_to ?? 'armed_away') })
             if (e.state === 'pending') change(e, { state: 'triggered' })
+          }
+          if (d === 'siren' && done && e.state === 'on') {
+            change(e, { state: 'off', attributes: { _auto: false } })
           }
           if (d === 'assist_satellite' && done) {
             const order: Record<string, [string, number] | undefined> = { listening: ['processing', TAKES.process], processing: ['responding', TAKES.respond], responding: ['idle', 0] }
@@ -208,7 +221,7 @@ export function createHomeSimulator(start: HassEntities, areaOf: Record<string, 
           if (d === 'media_player' && e.state === 'playing') {
             const pos = Number(e.attributes.media_position ?? 0) + dt
             const dur = Number(e.attributes.media_duration ?? 200)
-            change(e, { attributes: { media_position: pos >= dur ? 0 : pos } })
+            change(e, { attributes: { media_position: pos >= dur ? 0 : pos, media_position_updated_at: now() } })
           }
           // a device a button restarted comes back
           if (d === 'binary_sensor' && done && e.state === 'off') change(e, { state: 'on' })
@@ -376,9 +389,38 @@ function apply(e: HassEntity, domain: string, service: string, data: ServiceCall
         at.color_temp_kelvin = Number(data.color_temp_kelvin)
         at.color_mode = 'color_temp'
       }
-      if (data.rgb_color !== undefined) {
+      if (Array.isArray(data.rgb_color)) {
         at.rgb_color = data.rgb_color
         at.color_mode = 'rgb'
+      }
+      if (Array.isArray(data.hs_color)) {
+        const [h, s] = data.hs_color as [number, number]
+        at.hs_color = [h, s]
+        at.rgb_color = hs2rgb([h, s / 100]).map((c) => Math.round(c))
+        at.color_mode = 'hs'
+      }
+      if (Array.isArray(data.rgbw_color)) {
+        const rgbw = data.rgbw_color as [number, number, number, number]
+        at.rgbw_color = rgbw
+        at.rgb_color = rgbw2rgb(rgbw)
+        at.color_mode = 'rgbw'
+      }
+      if (Array.isArray(data.rgbww_color)) {
+        const rgbww = data.rgbww_color as [number, number, number, number, number]
+        at.rgbww_color = rgbww
+        at.rgb_color = rgbww2rgb(
+          rgbww,
+          typeof at.min_color_temp_kelvin === 'number' ? at.min_color_temp_kelvin : undefined,
+          typeof at.max_color_temp_kelvin === 'number' ? at.max_color_temp_kelvin : undefined,
+        )
+        at.color_mode = 'rgbww'
+      }
+      if (data.white) {
+        at.color_mode = 'white'
+        at.rgb_color = [255, 255, 255]
+      }
+      if (data.effect !== undefined) {
+        at.effect = String(data.effect)
       }
       return with_('on')
     }
@@ -429,10 +471,11 @@ function apply(e: HassEntity, domain: string, service: string, data: ServiceCall
     if (service === 'turn_on') return with_('on', data.percentage !== undefined ? { percentage: Number(data.percentage) } : {})
     if (service === 'set_percentage') {
       const p = Number(data.percentage)
-      return p === 0 ? with_('off') : with_('on', { percentage: p })
+      return p === 0 ? with_('off', { percentage: 0 }) : with_('on', { percentage: p })
     }
     if (service === 'oscillate') return with_(e.state, { oscillating: !!data.oscillating })
     if (service === 'set_direction') return with_(e.state, { direction: data.direction })
+    if (service === 'set_preset_mode') return with_(e.state === 'off' ? 'on' : e.state, { preset_mode: data.preset_mode })
   }
 
   if (d === 'cover' || d === 'valve') {
@@ -442,6 +485,13 @@ function apply(e: HassEntity, domain: string, service: string, data: ServiceCall
     if (service === 'close_cover' || service === 'close_valve') return to(0)
     if (service === 'stop_cover' || service === 'stop_valve') return with_(pos === 0 ? 'closed' : 'open', { _target: pos })
     if (service === 'set_cover_position' || service === 'set_valve_position') return to(Number(data.position))
+    if (d === 'cover') {
+      const tilt = Number(at.current_tilt_position ?? 0)
+      if (service === 'open_cover_tilt') return with_(e.state, { _tilt_target: 100 })
+      if (service === 'close_cover_tilt') return with_(e.state, { _tilt_target: 0 })
+      if (service === 'stop_cover_tilt') return with_(e.state, { _tilt_target: tilt })
+      if (service === 'set_cover_tilt_position') return with_(e.state, { _tilt_target: Number(data.tilt_position) })
+    }
   }
 
   if (d === 'lock') {
@@ -457,7 +507,13 @@ function apply(e: HassEntity, domain: string, service: string, data: ServiceCall
       return with_('disarmed')
     }
     if (service === 'alarm_trigger') return with_('triggered')
-    const mode = { alarm_arm_home: 'armed_home', alarm_arm_away: 'armed_away', alarm_arm_night: 'armed_night' }[service]
+    const mode = {
+      alarm_arm_home: 'armed_home',
+      alarm_arm_away: 'armed_away',
+      alarm_arm_night: 'armed_night',
+      alarm_arm_vacation: 'armed_vacation',
+      alarm_arm_custom_bypass: 'armed_custom_bypass',
+    }[service]
     if (mode) {
       timers[e.entity_id] = mode === 'armed_home' ? 1 : TAKES.arming
       return with_('arming', { _arm_to: mode })
@@ -465,24 +521,66 @@ function apply(e: HassEntity, domain: string, service: string, data: ServiceCall
   }
 
   if (d === 'siren') {
-    if (service === 'turn_off') return with_('off', { _auto: false })
-    if (service === 'turn_on') return with_('on', { tone: data.tone ?? at.tone ?? 'alarm', _auto: !!data._auto })
+    if (service === 'turn_off') {
+      delete timers[e.entity_id]
+      return with_('off', { _auto: false })
+    }
+    if (service === 'turn_on') {
+      const attrs: Record<string, unknown> = {
+        tone: data.tone ?? at.tone ?? 'alarm',
+        _auto: !!data._auto,
+      }
+      if (data.volume_level !== undefined) attrs.volume_level = Number(data.volume_level)
+      if (data.duration !== undefined) {
+        const secs = Number(data.duration)
+        attrs.duration = secs
+        if (secs > 0) timers[e.entity_id] = secs
+        else delete timers[e.entity_id]
+      } else {
+        delete timers[e.entity_id]
+      }
+      return with_('on', attrs)
+    }
   }
 
   if (d === 'media_player') {
+    const stampNow = new Date().toISOString()
     if (service === 'turn_off') return with_('off')
     if (service === 'turn_on') return with_('idle')
-    if (service === 'media_play_pause') return with_(e.state === 'playing' ? 'paused' : 'playing')
-    if (service === 'media_play') return with_('playing')
-    if (service === 'media_pause') return with_('paused')
+    if (service === 'media_play_pause') return with_(e.state === 'playing' ? 'paused' : 'playing', { media_position_updated_at: stampNow })
+    if (service === 'media_play') return with_('playing', { media_position_updated_at: stampNow })
+    if (service === 'media_pause') return with_('paused', { media_position_updated_at: stampNow })
+    if (service === 'media_stop') return with_('idle', { media_position: 0, media_position_updated_at: stampNow })
+    if (service === 'media_seek') {
+      const dur = Number(at.media_duration ?? 0)
+      const pos = Math.max(0, Math.min(dur || Infinity, Number(data.seek_position ?? 0)))
+      return with_(e.state, { media_position: pos, media_position_updated_at: stampNow })
+    }
     if (service === 'volume_set') return with_(e.state, { volume_level: Number(data.volume_level), is_volume_muted: false })
+    if (service === 'volume_up' || service === 'volume_down') {
+      const cur = Number(at.volume_level ?? 0.5)
+      const nextVol = Math.max(0, Math.min(1, cur + (service === 'volume_up' ? 0.05 : -0.05)))
+      return with_(e.state, { volume_level: Math.round(nextVol * 100) / 100, is_volume_muted: false })
+    }
     if (service === 'volume_mute') return with_(e.state, { is_volume_muted: !!data.is_volume_muted })
+    if (service === 'shuffle_set') return with_(e.state, { shuffle: !!data.shuffle })
+    if (service === 'repeat_set') return with_(e.state, { repeat: String(data.repeat ?? 'off') })
     if (service === 'select_source') return with_(e.state === 'off' ? 'idle' : e.state, { source: data.source })
+    if (service === 'select_sound_mode') return with_(e.state, { sound_mode: data.sound_mode })
     if (service === 'media_next_track' || service === 'media_previous_track') {
-      const list = (at._playlist as { title: string; artist: string; duration: number }[] | undefined) ?? []
+      const list = (at._playlist as { title: string; artist: string; duration: number; art?: string[] }[] | undefined) ?? []
       const i = list.findIndex((t) => t.title === at.media_title)
       const n = list[(i + (service === 'media_next_track' ? 1 : list.length - 1)) % Math.max(1, list.length)]
-      return n ? with_('playing', { media_title: n.title, media_artist: n.artist, media_duration: n.duration, media_position: 0 }) : e
+      return n
+        ? with_('playing', {
+            media_title: n.title,
+            media_artist: n.artist,
+            media_duration: n.duration,
+            media_position: 0,
+            media_position_updated_at: stampNow,
+            ...(n.art ? { _art: n.art } : {}),
+          })
+        : e
     }
   }
 
@@ -495,7 +593,8 @@ function apply(e: HassEntity, domain: string, service: string, data: ServiceCall
 
   if (d === 'vacuum' || d === 'lawn_mower') {
     const work = d === 'vacuum' ? 'cleaning' : 'mowing'
-    if (service === 'start' || service === 'start_mowing') return with_(work)
+    if (service === 'start' || service === 'start_mowing' || service === 'clean_spot') return with_(work)
+    if (service === 'start_pause') return with_(e.state === work ? 'paused' : work)
     if (service === 'pause') return with_('paused')
     if (service === 'stop') return with_('idle')
     if (service === 'return_to_base' || service === 'dock') {
@@ -511,6 +610,7 @@ function apply(e: HassEntity, domain: string, service: string, data: ServiceCall
     if (service === 'turn_on') return with_(String(at._last_mode ?? 'eco'))
     if (service === 'set_operation_mode') return with_(String(data.operation_mode), data.operation_mode !== 'off' ? { _last_mode: data.operation_mode } : {})
     if (service === 'set_temperature') return with_(e.state, { temperature: Number(data.temperature) })
+    if (service === 'set_away_mode') return with_(e.state, { away_mode: data.away_mode ? 'on' : 'off' })
   }
 
   if (d === 'assist_satellite') {
@@ -540,7 +640,7 @@ function apply(e: HassEntity, domain: string, service: string, data: ServiceCall
     if (service === 'send_command') return with_(e.state === 'off' ? 'on' : e.state, { _sent: Date.now(), _command: data.command })
   }
   if ((d === 'infrared' || d === 'radio_frequency') && service === 'send_command') return with_(stamp, { _sent: Date.now(), _command: data.command })
-  if (d === 'button' && service === 'press') return with_(stamp)
+  if ((d === 'button' || d === 'input_button') && service === 'press') return with_(stamp)
   if (d === 'scene' && service === 'turn_on') return with_(stamp)
   if (d === 'notify' && service === 'send_message') return with_(stamp, { _last: data.message })
   if (d === 'tts' && service === 'speak') return with_(stamp)
@@ -549,12 +649,17 @@ function apply(e: HassEntity, domain: string, service: string, data: ServiceCall
   if (d === 'wake_word' && service === 'detect') return with_(stamp)
   if (d === 'event' && domain === 'lab' && service === 'fire') return with_(stamp, { event_type: data.event_type })
   if (d === 'weather' && domain === 'lab' && service === 'set_condition') return with_(String(data.condition))
-  if (d === 'number' && service === 'set_value') return with_(String(data.value))
-  if (d === 'select' && service === 'select_option') return with_(String(data.option))
-  if ((d === 'text' || d === 'date' || d === 'time' || d === 'datetime') && service === 'set_value') return with_(String(data.value ?? data.date ?? data.time ?? data.datetime))
+  if ((d === 'number' || d === 'input_number') && service === 'set_value') return with_(String(data.value))
+  if ((d === 'select' || d === 'input_select') && service === 'select_option') return with_(String(data.option))
+  if ((d === 'text' || d === 'input_text' || d === 'date' || d === 'time' || d === 'datetime') && service === 'set_value') return with_(String(data.value ?? data.date ?? data.time ?? data.datetime))
+  if (d === 'input_datetime' && service === 'set_datetime') {
+    const parts = [data.date, data.time].filter(Boolean).map(String)
+    return with_(parts.join(' '))
+  }
   if (d === 'update') {
     if (service === 'install') return with_(e.state, { in_progress: true, update_percentage: 0 })
     if (service === 'skip') return with_('off', { skipped_version: at.latest_version })
+    if (service === 'clear_skipped') return with_(at.installed_version !== at.latest_version ? 'on' : 'off', { skipped_version: null })
   }
   if (d === 'todo') {
     type Item = { summary: string; status: 'needs_action' | 'completed' }

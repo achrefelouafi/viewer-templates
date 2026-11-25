@@ -21,6 +21,7 @@ export type SelectMenuProps = {
   disabled?: boolean
   hideLabel?: boolean
   showArrow?: boolean
+  fullWidth?: boolean
   defaultIconPath?: string
   onSelect: (value: string) => void
 }
@@ -40,6 +41,7 @@ export function SelectMenu({
   disabled = false,
   hideLabel = false,
   showArrow = false,
+  fullWidth = false,
   defaultIconPath,
   onSelect,
 }: SelectMenuProps) {
@@ -149,7 +151,7 @@ export function SelectMenu({
   }, [open, options, activeIndex, onSelect])
 
   return (
-    <div className="min-w-[120px] max-w-[140px] flex-1">
+    <div className={fullWidth ? 'w-full' : 'min-w-[120px] max-w-[140px] flex-1'}>
       <button
         ref={triggerRef}
         type="button"

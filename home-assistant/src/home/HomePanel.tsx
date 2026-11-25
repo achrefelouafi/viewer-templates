@@ -1,21 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  ALARM_LABEL,
-  ALERT,
-  alarmColor,
-  binaryLabel,
   openness,
   TOGGLE_DOMAINS,
   tripped,
-  climateColor,
   describeCall,
   domainOf,
   FIELDS,
-  fieldColor,
   fieldOf,
   isOn,
-  kelvinColor,
-  lightColor,
   nameOf,
   statusOf,
   type Area,
@@ -26,7 +18,44 @@ import {
   type ServiceCall,
 } from './entities'
 import { ClimateEntityFeature, supportsFeature } from './controls/climate'
+import { EntityDetails, MoreInfoDefault } from './controls/EntityDetails'
+import { MoreInfoAlarmControlPanel } from './controls/MoreInfoAlarmControlPanel'
+import { MoreInfoCamera, MoreInfoImage } from './controls/MoreInfoCamera'
 import { MoreInfoClimate } from './controls/MoreInfoClimate'
+import { MoreInfoCover } from './controls/MoreInfoCover'
+import { MoreInfoFan } from './controls/MoreInfoFan'
+import {
+  MoreInfoAutomation,
+  MoreInfoCounter,
+  MoreInfoDate,
+  MoreInfoDatetime,
+  MoreInfoGroup,
+  MoreInfoInputDatetime,
+  MoreInfoPerson,
+  MoreInfoRemote,
+  MoreInfoScript,
+  MoreInfoSun,
+  MoreInfoTime,
+  MoreInfoTimer,
+} from './controls/MoreInfoHelpers'
+import { MoreInfoHumidifier } from './controls/MoreInfoHumidifier'
+import {
+  MoreInfoButton,
+  MoreInfoNumber,
+  MoreInfoScene,
+  MoreInfoSelect,
+  MoreInfoText,
+} from './controls/MoreInfoInputs'
+import { MoreInfoLawnMower } from './controls/MoreInfoLawnMower'
+import { MoreInfoLight } from './controls/MoreInfoLight'
+import { MoreInfoLock } from './controls/MoreInfoLock'
+import { MoreInfoMediaPlayer } from './controls/MoreInfoMediaPlayer'
+import { MoreInfoInputBoolean, MoreInfoSiren, MoreInfoSwitch } from './controls/MoreInfoToggleDomains'
+import { MoreInfoUpdate } from './controls/MoreInfoUpdate'
+import { MoreInfoVacuum } from './controls/MoreInfoVacuum'
+import { MoreInfoValve } from './controls/MoreInfoValve'
+import { MoreInfoWaterHeater } from './controls/MoreInfoWaterHeater'
+import { MoreInfoWeather } from './controls/MoreInfoWeather'
 import { type EntityFormatters, useEntityFormatters } from './hass/names'
 import type { PinRefs } from './HomeEffects'
 
@@ -109,43 +138,25 @@ function Icon({ e, className }: { e: HassEntity; className?: string }) {
 }
 const Power = () => <Svg><path d="M12 3v9M6.3 7.3a8 8 0 1 0 11.4 0" /></Svg>
 
-/** The colour a device shows on its pin and icon while it is on. */
-function accent(e: HassEntity) {
-  switch (domainOf(e.entity_id)) {
-    case 'light': return lightColor(e)
-    case 'climate': return climateColor(e)
-    case 'fan': return '#9fe8ff'
-    case 'lock': return e.state === 'locked' ? ALERT.ok : e.state === 'jammed' ? ALERT.danger : ALERT.warn
-    case 'alarm_control_panel': return alarmColor(e.state)
-    case 'siren': return ALERT.danger
-    case 'binary_sensor': {
-      const dc = String(e.attributes.device_class)
-      if (dc === 'connectivity') return tripped(e) ? '#5ce1c6' : ALERT.danger
-      if (!tripped(e)) return ALERT.ok
-      return dc === 'moisture' ? ALERT.water : dc === 'motion' || dc === 'door' || dc === 'window' ? ALERT.warn : ALERT.danger
-    }
-    case 'camera': return e.state === 'recording' ? ALERT.danger : ALERT.info
-    case 'media_player': return ((e.attributes._art as string[] | undefined) ?? ['#8a9cff'])[0]!
-    case 'valve':
-    case 'cover': return ALERT.info
-    case 'water_heater': return '#ff8a3d'
-    case 'switch': return '#ffc247'
-    case 'vacuum': return '#7fd3ff'
-    case 'lawn_mower': return '#9be36b'
-    case 'assist_satellite': return e.state === 'idle' ? '#dfe7ef' : ALERT.info
-    case 'humidifier': return '#7cc8ff'
-    case 'person':
-    case 'device_tracker': return String(e.attributes._color ?? '#ff8a5c')
-    case 'remote': return '#ffd166'
-    case 'infrared': return '#ff5d8f'
-    case 'radio_frequency': return '#b48cff'
-    case 'event': return '#ffd166'
-    default: {
-      const k = fieldOf(e)
-      return k ? fieldColor(k, Number(e.state)) : '#9aa3ad'
-    }
-  }
-}
+const HIDE_HEADER_SWITCH = new Set([
+  'climate',
+  'light',
+  'fan',
+  'cover',
+  'valve',
+  'lock',
+  'alarm_control_panel',
+  'humidifier',
+  'water_heater',
+  'media_player',
+  'camera',
+  'vacuum',
+  'lawn_mower',
+  'switch',
+  'input_boolean',
+  'siren',
+])
+
 const toggles = (e: HassEntity) => {
   const d = domainOf(e.entity_id)
   if (d === 'climate') {
@@ -154,6 +165,7 @@ const toggles = (e: HassEntity) => {
       supportsFeature(e, ClimateEntityFeature.TURN_OFF)
     )
   }
+  if (d === 'input_boolean') return true
   return TOGGLE_DOMAINS.includes(d)
 }
 /** Whether the pin and icon show the device's colour: on, open, working, or (sensors) always. */
@@ -205,53 +217,12 @@ function Seg<T extends string | number>({ label, value, options, onPick }: { lab
   )
 }
 
-/** A slider that fills in the text colour (white on dark); `color` is kept for callers but no longer tints it. */
-function Range({ label, value, min, max, step, disabled, onCommit, format }: {
-  label: string; value: number; min: number; max: number; step: number; color?: string; disabled?: boolean; onCommit: (v: number) => void; format: (v: number) => string
-}) {
-  // drag freely, call the service on release, as Home Assistant's own sliders do
-  const [v, setV] = useState(value)
-  const dragging = useRef(false)
-  useEffect(() => {
-    if (!dragging.current) setV(value)
-  }, [value])
-  const commit = () => {
-    dragging.current = false
-    if (v !== value) onCommit(v)
-  }
-  return (
-    <label className="grid gap-1.5">
-      <span className="flex justify-between text-muted-foreground text-xs">{label}<b className="font-medium text-foreground">{format(v)}</b></span>
-      <input type="range" min={min} max={max} step={step} value={v} disabled={disabled} aria-label={label}
-        className="h-2 w-full cursor-pointer appearance-none rounded-full text-foreground accent-foreground disabled:opacity-40 [&::-moz-range-thumb]:size-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:shadow-md [&::-webkit-slider-thumb]:size-5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md"
-        style={{ background: `linear-gradient(90deg, currentColor ${((v - min) / (max - min)) * 100}%, color-mix(in oklab, currentColor 14%, transparent) 0)` }}
-        onChange={(ev) => { dragging.current = true; setV(Number(ev.target.value)) }}
-        onPointerUp={commit} onKeyUp={commit} onBlur={() => dragging.current && commit()} />
-    </label>
-  )
-}
-
 function Stat({ k, v }: { k: string; v: string }) {
   return (
     <div className="grid gap-0.5 rounded-xl bg-foreground/5 px-3 py-2">
       <span className="text-muted-foreground text-xs">{k}</span>
       <b className="font-medium font-mono text-sm">{v}</b>
     </div>
-  )
-}
-
-function Spark({ data, color }: { data: number[]; color: string }) {
-  if (data.length < 2) return null
-  const lo = Math.min(...data)
-  const hi = Math.max(...data)
-  const pad = (hi - lo) * 0.15 || 0.15
-  const pts = data.map((v, i) => [(i / (data.length - 1)) * 260, 56 - ((v - lo + pad) / (hi - lo + pad * 2)) * 50] as const)
-  const line = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join('')
-  return (
-    <svg className="h-16 w-full" viewBox="0 0 260 60" preserveAspectRatio="none" role="img" aria-label="Reading over the last minute">
-      <path d={`${line}L260 60L0 60Z`} fill={color} opacity="0.16" />
-      <path d={line} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" />
-    </svg>
   )
 }
 
@@ -269,11 +240,11 @@ function Actions({ items }: { items: { t: string; on?: boolean; go: () => void }
   )
 }
 
-/** A device's state, large and in its colour. */
-function BigState({ color, text, sub }: { color: string; text: string; sub?: string }) {
+/** Lab-only big state display. */
+function BigState({ text, sub }: { text: string; sub?: string }) {
   return (
     <div className="grid gap-0.5">
-      <b className="font-semibold text-2xl" data-tone={color}>{text}</b>
+      <b className="font-semibold text-2xl">{text}</b>
       {sub && <span className="text-muted-foreground text-xs">{sub}</span>}
     </div>
   )
@@ -289,7 +260,7 @@ function LabOnly({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-/** A one-line input and its button: messages, to-do items, dates, Assist. */
+/** A one-line input and its button: lab-only cards (messages, to-do items, Assist). */
 function Send({ placeholder, initial = '', button, type = 'text', clear = false, onSend }: { placeholder?: string; initial?: string; button: string; type?: string; clear?: boolean; onSend: (v: string) => void }) {
   const [v, setV] = useState(initial)
   useEffect(() => setV(initial), [initial])
@@ -305,42 +276,6 @@ function Send({ placeholder, initial = '', button, type = 'text', clear = false,
       <button type="submit" className="rounded-full bg-foreground px-3 py-1.5 font-medium text-background text-sm">{button}</button>
     </form>
   )
-}
-
-/** A stand-in camera still for image entities: a porch, drawn from the snapshot's seed. */
-function Snapshot({ seed, caption }: { seed: number; caption: string }) {
-  const ref = useRef<HTMLCanvasElement>(null)
-  useEffect(() => {
-    const g = ref.current?.getContext('2d')
-    if (!g) return
-    const W = 320
-    const H = 180
-    const sky = g.createLinearGradient(0, 0, 0, H)
-    sky.addColorStop(0, '#2b3a52')
-    sky.addColorStop(1, '#5b6b7e')
-    g.fillStyle = sky
-    g.fillRect(0, 0, W, H)
-    g.fillStyle = '#3a3530'
-    g.fillRect(110, 30, 100, 150)
-    g.fillStyle = '#6b4a2f'
-    g.fillRect(125, 45, 70, 135)
-    g.fillStyle = '#7c8a6b'
-    g.fillRect(0, 150, W, 30)
-    if (caption.startsWith('Someone')) {
-      // a visitor, somewhere on the porch
-      const x = 70 + seed * 180
-      g.fillStyle = '#d9a98a'
-      g.beginPath()
-      g.arc(x, 78, 14, 0, Math.PI * 2)
-      g.fill()
-      g.fillStyle = '#c0533b'
-      g.fillRect(x - 18, 94, 36, 60)
-    }
-    g.fillStyle = 'rgba(255,255,255,.85)'
-    g.font = '11px ui-monospace, monospace'
-    g.fillText(new Date().toLocaleTimeString(), 8, 16)
-  }, [seed, caption])
-  return <canvas ref={ref} width={320} height={180} className="w-full rounded-xl" aria-label={caption} />
 }
 
 /** How the Home tab groups the entities that are not a thing in a room. */
@@ -370,230 +305,66 @@ function simulateLabel(dc: string, on: boolean) {
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
-function Controls({ e, call, formatters, history, layer, onLayer, areas }: { e: HassEntity; call: Call; formatters: EntityFormatters; history: number[]; layer: FieldKind | null; onLayer: (k: FieldKind | null) => void; areas: Area[] }) {
+function Controls({ e, entities, call, formatters, history, layer, onLayer, onSelect, areas, isLab }: { e: HassEntity; entities: HassEntities; call: Call; formatters: EntityFormatters; history: number[]; layer: FieldKind | null; onLayer: (k: FieldKind | null) => void; onSelect: (id: string | null) => void; areas: Area[]; isLab: boolean }) {
   const id = e.entity_id
   const a = e.attributes
-  switch (domainOf(id)) {
-    case 'light': {
-      const modes = (a.supported_color_modes as string[] | undefined) ?? []
-      const rgb = a.rgb_color as [number, number, number] | undefined
-      return (
-        <>
-          <Range label="Brightness" value={Math.max(1, Math.round((Number(a.brightness ?? 255) / 255) * 100))} min={1} max={100} step={1}
-            color={lightColor(e)} onCommit={(v) => call('light', 'turn_on', { entity_id: id, brightness_pct: v })} format={(v) => `${v}%`} />
-          {modes.includes('color_temp') && (
-            <Seg<number> label="White" value={a.color_mode === 'color_temp' ? Number(a.color_temp_kelvin) : 0}
-              onPick={(k) => call('light', 'turn_on', { entity_id: id, color_temp_kelvin: k })}
-              options={[2700, 4000, 6500].map((k) => ({ v: k, t: k === 2700 ? 'Warm' : k === 4000 ? 'Neutral' : 'Cool', c: kelvinColor(k) }))} />
-          )}
-          {modes.includes('rgb') && (
-            <div className="grid gap-1.5">
-              <span className="text-muted-foreground text-xs">Colour</span>
-              <div className="flex gap-2">
-                {([[255, 80, 80], [255, 170, 60], [255, 230, 90], [90, 230, 140], [70, 190, 255], [150, 110, 255], [255, 110, 200]] as [number, number, number][]).map((c) => {
-                  const on = a.color_mode === 'rgb' && rgb?.join() === c.join()
-                  return <button key={c.join()} type="button" aria-label={`Colour ${c.join(', ')}`} aria-pressed={on}
-                    className={`size-7 rounded-full ring-offset-2 ring-offset-background ${on ? 'ring-2 ring-foreground' : ''}`} style={{ background: `rgb(${c})` }}
-                    onClick={() => call('light', 'turn_on', { entity_id: id, rgb_color: c })} />
-                })}
-              </div>
-            </div>
-          )}
-        </>
-      )
-    }
+  const d = domainOf(id)
+  switch (d) {
+    case 'light':
+      return <MoreInfoLight entity={e} call={call} formatters={formatters} />
     case 'climate':
       return <MoreInfoClimate entity={e} call={call} formatters={formatters} />
-    case 'fan': {
-      const pct = Number(a.percentage ?? 0)
-      return (
-        <>
-          <Range label="Speed" value={pct} min={0} max={100} step={Number(a.percentage_step ?? 1)} color="#9fe8ff"
-            onCommit={(v) => call('fan', 'set_percentage', { entity_id: id, percentage: v })} format={(v) => (v ? `${Math.round(v)}%` : 'Off')} />
-          <div className="flex items-center justify-between">
-            <span className="text-sm">Oscillate</span>
-            <Switch on={!!a.oscillating} label="Oscillate" onChange={() => call('fan', 'oscillate', { entity_id: id, oscillating: !a.oscillating })} />
-          </div>
-          {a.direction !== undefined && (
-            <Seg<string> label="Direction" value={String(a.direction)} onPick={(d) => call('fan', 'set_direction', { entity_id: id, direction: d })}
-              options={[{ v: 'forward', t: 'Down (summer)' }, { v: 'reverse', t: 'Up (winter)' }]} />
-          )}
-        </>
-      )
-    }
+    case 'fan':
+      return <MoreInfoFan entity={e} call={call} formatters={formatters} />
     case 'cover':
-    case 'valve': {
-      const d = domainOf(id)
-      const pos = Number(a.current_position ?? (e.state === 'open' ? 100 : 0))
-      return (
-        <>
-          <Actions items={[
-            { t: 'Open', on: e.state === 'opening', go: () => call(d, `open_${d}`, { entity_id: id }) },
-            { t: 'Stop', go: () => call(d, `stop_${d}`, { entity_id: id }) },
-            { t: 'Close', on: e.state === 'closing', go: () => call(d, `close_${d}`, { entity_id: id }) },
-          ]} />
-          <Range label="Position" value={pos} min={0} max={100} step={1} color={ALERT.info}
-            onCommit={(v) => call(d, `set_${d}_position`, { entity_id: id, position: v })} format={(v) => (v === 0 ? 'Closed' : v === 100 ? 'Open' : `${Math.round(v)}%`)} />
-        </>
-      )
-    }
-    case 'lock': {
-      const locked = e.state === 'locked'
-      return (
-        <>
-          <BigState color={accent(e)} text={cap(e.state)} sub={e.state.endsWith('ing') ? 'The lock is turning' : locked ? 'The door is secured' : 'Anyone can open the door'} />
-          <Actions items={[
-            { t: 'Lock', on: locked, go: () => call('lock', 'lock', { entity_id: id }) },
-            { t: 'Unlock', on: e.state === 'unlocked', go: () => call('lock', 'unlock', { entity_id: id }) },
-            { t: 'Open door', on: e.state === 'open', go: () => call('lock', 'open', { entity_id: id }) },
-          ]} />
-        </>
-      )
-    }
+      return <MoreInfoCover entity={e} call={call} formatters={formatters} />
+    case 'valve':
+      return <MoreInfoValve entity={e} call={call} formatters={formatters} />
+    case 'lock':
+      return <MoreInfoLock entity={e} call={call} formatters={formatters} />
     case 'binary_sensor': {
       const on = tripped(e)
       return (
-        <>
-          <BigState color={accent(e)} text={binaryLabel(e)} sub={e.last_changed ? `Since ${new Date(e.last_changed).toLocaleTimeString()}` : 'No change yet'} />
-          {/* a real home's sensors change on their own; in the lab a button stands in for the world */}
-          <div className="grid gap-1.5 rounded-xl border border-dashed border-border p-2.5">
-            <span className="text-muted-foreground text-xs">Lab only: what the world would do</span>
-            <button type="button" onClick={() => call('lab', 'simulate', { entity_id: id, state: on ? 'off' : 'on' })}
-              className="rounded-full bg-foreground/5 px-3 py-1.5 text-sm hover:bg-foreground/10">
-              {simulateLabel(String(a.device_class), on)}
-            </button>
-          </div>
-        </>
+        <MoreInfoDefault entity={e} formatters={formatters}>
+          {isLab && (
+            <LabOnly label="What the world would do">
+              <button type="button" onClick={() => call('lab', 'simulate', { entity_id: id, state: on ? 'off' : 'on' })}
+                className="rounded-full bg-foreground/5 px-3 py-1.5 text-sm hover:bg-foreground/10">
+                {simulateLabel(String(a.device_class), on)}
+              </button>
+            </LabOnly>
+          )}
+        </MoreInfoDefault>
       )
     }
-    case 'siren': return (
-      <Seg<string> label="Tone" value={String(a.tone)} onPick={(tone) => call('siren', 'turn_on', { entity_id: id, tone })}
-        options={((a.available_tones as string[]) ?? ['alarm']).map((t) => ({ v: t, t: cap(t) }))} />
-    )
-    case 'alarm_control_panel': return (
-      <>
-        <BigState color={alarmColor(e.state)} text={ALARM_LABEL[e.state] ?? e.state} sub={e.state === 'pending' ? 'Disarm before the delay runs out' : e.state.startsWith('armed') ? 'Motion or an opened door will set it off' : ''} />
-        <Actions items={[
-          { t: 'Disarm', on: e.state === 'disarmed', go: () => call('alarm_control_panel', 'alarm_disarm', { entity_id: id }) },
-          { t: 'Home', on: e.state === 'armed_home', go: () => call('alarm_control_panel', 'alarm_arm_home', { entity_id: id }) },
-          { t: 'Away', on: e.state === 'armed_away', go: () => call('alarm_control_panel', 'alarm_arm_away', { entity_id: id }) },
-          { t: 'Night', on: e.state === 'armed_night', go: () => call('alarm_control_panel', 'alarm_arm_night', { entity_id: id }) },
-        ]} />
-        <button type="button" onClick={() => call('alarm_control_panel', 'alarm_trigger', { entity_id: id })} className="rounded-full border border-red-500/40 px-3 py-1.5 text-red-500 text-sm hover:bg-red-500/10">Panic</button>
-      </>
-    )
-    case 'media_player': {
-      const vol = Math.round(Number(a.volume_level ?? 0) * 100)
-      return (
-        <>
-          {e.state !== 'off' && (
-            <div className="flex items-center gap-3 rounded-xl p-2.5" style={{ background: `linear-gradient(120deg, ${((a._art as string[]) ?? ['#555', '#333']).join(', ')})` }}>
-              <span className="grid min-w-0 flex-1 text-white">
-                <b className="truncate font-semibold">{String(a.media_title ?? 'Nothing playing')}</b>
-                <small className="truncate opacity-80">{String(a.media_artist ?? '')} · {String(a.source ?? '')}</small>
-              </span>
-            </div>
-          )}
-          <Actions items={[
-            { t: '⏮', go: () => call('media_player', 'media_previous_track', { entity_id: id }) },
-            { t: e.state === 'playing' ? 'Pause' : 'Play', on: e.state === 'playing', go: () => call('media_player', 'media_play_pause', { entity_id: id }) },
-            { t: '⏭', go: () => call('media_player', 'media_next_track', { entity_id: id }) },
-            { t: a.is_volume_muted ? 'Unmute' : 'Mute', on: !!a.is_volume_muted, go: () => call('media_player', 'volume_mute', { entity_id: id, is_volume_muted: !a.is_volume_muted }) },
-          ]} />
-          <Range label="Volume" value={vol} min={0} max={100} step={1} color={accent(e)} onCommit={(v) => call('media_player', 'volume_set', { entity_id: id, volume_level: v / 100 })} format={(v) => `${Math.round(v)}%`} />
-          {Array.isArray(a.source_list) && (
-            <Seg<string> label="Source" value={String(a.source)} onPick={(source) => call('media_player', 'select_source', { entity_id: id, source })}
-              options={(a.source_list as string[]).map((s) => ({ v: s, t: s }))} />
-          )}
-        </>
-      )
-    }
-    case 'camera': return (
-      <>
-        <BigState color={accent(e)} text={e.state === 'recording' ? 'Recording' : e.state === 'off' ? 'Off' : 'Live'} sub={e.state === 'recording' ? 'Something is moving in view' : 'Watching the garden and the front door'} />
-        <div className="flex items-center justify-between">
-          <span className="text-sm">Motion detection</span>
-          <Switch on={!!a.motion_detection} label="Motion detection" onChange={() => call('camera', a.motion_detection ? 'disable_motion_detection' : 'enable_motion_detection', { entity_id: id })} />
-        </div>
-      </>
-    )
+    case 'siren':
+      return <MoreInfoSiren entity={e} call={call} formatters={formatters} />
+    case 'alarm_control_panel':
+      return <MoreInfoAlarmControlPanel entity={e} call={call} formatters={formatters} />
+    case 'media_player':
+      return <MoreInfoMediaPlayer entity={e} call={call} formatters={formatters} />
+    case 'camera':
+      return <MoreInfoCamera entity={e} call={call} formatters={formatters} />
+    case 'image':
+      return <MoreInfoImage entity={e} formatters={formatters} isLab={isLab} />
     case 'vacuum':
-    case 'lawn_mower': {
-      const d = domainOf(id)
-      const working = e.state === 'cleaning' || e.state === 'mowing'
-      return (
-        <>
-          <div className="grid grid-cols-2 gap-2">
-            <Stat k="Status" v={cap(e.state)} />
-            <Stat k="Battery" v={`${Math.round(Number(a.battery_level ?? 0))}%`} />
-          </div>
-          <Actions items={[
-            { t: 'Start', on: working, go: () => call(d, d === 'vacuum' ? 'start' : 'start_mowing', { entity_id: id }) },
-            { t: 'Pause', on: e.state === 'paused', go: () => call(d, 'pause', { entity_id: id }) },
-            { t: 'Dock', on: e.state === 'returning' || e.state === 'docked', go: () => call(d, d === 'vacuum' ? 'return_to_base' : 'dock', { entity_id: id }) },
-            ...(d === 'vacuum' ? [{ t: 'Locate', go: () => call(d, 'locate', { entity_id: id }) }] : []),
-          ]} />
-          {Array.isArray(a.fan_speed_list) && (
-            <Seg<string> label="Suction" value={String(a.fan_speed)} onPick={(fan_speed) => call(d, 'set_fan_speed', { entity_id: id, fan_speed })}
-              options={(a.fan_speed_list as string[]).map((s) => ({ v: s, t: cap(s) }))} />
-          )}
-        </>
-      )
-    }
-    case 'switch': return (
-      <div className="grid grid-cols-2 gap-2">
-        <Stat k="Drawing" v={`${Math.round(Number(a.current_power_w ?? 0))} W`} />
-        <Stat k="Rated" v={`${a.rated_power_w ?? '—'} W`} />
-      </div>
-    )
-    case 'water_heater': {
-      const target = Number(a.temperature ?? 55)
-      return (
-        <>
-          <div className="flex items-center justify-between gap-3">
-            <button type="button" aria-label="Lower the target" disabled={target <= Number(a.min_temp ?? 35)} onClick={() => call('water_heater', 'set_temperature', { entity_id: id, temperature: target - 1 })}
-              className="grid size-10 place-items-center rounded-full bg-foreground/5 text-lg disabled:opacity-40">−</button>
-            <div className="grid text-center">
-              <b className="font-mono font-semibold text-4xl">{target}°</b>
-              <span className="text-muted-foreground text-xs">Tank {Number(a.current_temperature ?? 0).toFixed(1)}°</span>
-            </div>
-            <button type="button" aria-label="Raise the target" disabled={target >= Number(a.max_temp ?? 70)} onClick={() => call('water_heater', 'set_temperature', { entity_id: id, temperature: target + 1 })}
-              className="grid size-10 place-items-center rounded-full bg-foreground/5 text-lg disabled:opacity-40">+</button>
-          </div>
-          <Seg<string> label="Mode" value={e.state} onPick={(m) => call('water_heater', 'set_operation_mode', { entity_id: id, operation_mode: m })}
-            options={((a.operation_list as string[]) ?? []).map((m) => ({ v: m, t: cap(m) }))} />
-        </>
-      )
-    }
-    case 'assist_satellite': return (
-      <>
-        <BigState color={accent(e)} text={cap(e.state)} sub={a._said ? `“${a._said}”` : 'Say the wake word, or announce something'} />
-        <Actions items={[
-          { t: 'Wake word', on: e.state === 'listening', go: () => call('assist_satellite', 'start_conversation', { entity_id: id }) },
-          { t: 'Announce', on: e.state === 'responding', go: () => call('assist_satellite', 'announce', { entity_id: id, message: 'Dinner is ready' }) },
-        ]} />
-      </>
-    )
-    case 'humidifier': return (
-      <>
-        <div className="grid grid-cols-2 gap-2">
-          <Stat k="Room" v={`${a.current_humidity ?? '—'}%`} />
-          <Stat k="Doing" v={cap(String(a.action ?? 'off'))} />
-        </div>
-        <Range label="Target" value={Number(a.humidity ?? 50)} min={Number(a.min_humidity ?? 30)} max={Number(a.max_humidity ?? 80)} step={1} color="#7cc8ff"
-          onCommit={(v) => call('humidifier', 'set_humidity', { entity_id: id, humidity: v })} format={(v) => `${Math.round(v)}%`} />
-        {Array.isArray(a.available_modes) && (
-          <Seg<string> label="Mode" value={String(a.mode)} onPick={(mode) => call('humidifier', 'set_mode', { entity_id: id, mode })} options={(a.available_modes as string[]).map((m) => ({ v: m, t: cap(m) }))} />
-        )}
-      </>
-    )
+      return <MoreInfoVacuum entity={e} entities={entities} call={call} formatters={formatters} />
+    case 'lawn_mower':
+      return <MoreInfoLawnMower entity={e} entities={entities} call={call} formatters={formatters} />
+    case 'switch':
+      return <MoreInfoSwitch entity={e} call={call} formatters={formatters} />
+    case 'input_boolean':
+      return <MoreInfoInputBoolean entity={e} call={call} formatters={formatters} />
+    case 'water_heater':
+      return <MoreInfoWaterHeater entity={e} call={call} formatters={formatters} />
+    case 'humidifier':
+      return <MoreInfoHumidifier entity={e} call={call} formatters={formatters} />
     case 'person':
     case 'device_tracker': {
       const room = String(a._room ?? '')
       return (
-        <>
-          <BigState color={accent(e)} text={e.state === 'home' ? `Home · ${cap(room)}` : 'Away'} sub={a.battery_level !== undefined ? `Phone battery ${a.battery_level}%` : undefined} />
-          {domainOf(id) === 'person' && (
+        <MoreInfoPerson entity={e} formatters={formatters}>
+          {isLab && d === 'person' && (
             <LabOnly label="Move them">
               <div className="flex flex-wrap gap-1.5">
                 {[...areas.map((x) => ({ v: x.id, t: x.name })), { v: 'not_home', t: 'Away' }].map((r) => (
@@ -609,106 +380,114 @@ function Controls({ e, call, formatters, history, layer, onLayer, areas }: { e: 
               </div>
             </LabOnly>
           )}
-        </>
+        </MoreInfoPerson>
       )
     }
-    case 'remote': return (
-      <>
-        {Array.isArray(a.activity_list) && (
-          <Seg<string> label="Activity" value={String(a.current_activity)} onPick={(activity) => call('remote', 'turn_on', { entity_id: id, activity })} options={(a.activity_list as string[]).map((x) => ({ v: x, t: x }))} />
-        )}
-        <Actions items={['power', 'volume_down', 'volume_up', 'next'].map((c) => ({ t: CMD[c]!, go: () => call('remote', 'send_command', { entity_id: id, command: c }) }))} />
-      </>
-    )
+    case 'remote':
+      return (
+        <MoreInfoRemote entity={e} call={call} formatters={formatters}>
+          {isLab && (
+            <LabOnly label="Remote commands">
+              <Actions items={['power', 'volume_down', 'volume_up', 'next'].map((c) => ({ t: CMD[c]!, go: () => call('remote', 'send_command', { entity_id: id, command: c }) }))} />
+            </LabOnly>
+          )}
+        </MoreInfoRemote>
+      )
+    case 'event':
+      return (
+        <MoreInfoDefault entity={e} formatters={formatters}>
+          {isLab && (
+            <LabOnly label="What the world would do">
+              <button type="button" onClick={() => call('lab', 'fire', { entity_id: id, event_type: ((a.event_types as string[]) ?? ['press'])[0] })} className="w-full rounded-full bg-foreground/5 px-3 py-1.5 text-sm hover:bg-foreground/10">Ring the bell</button>
+            </LabOnly>
+          )}
+        </MoreInfoDefault>
+      )
+    case 'weather':
+      return (
+        <MoreInfoWeather entity={e} formatters={formatters} isLab={isLab}>
+          {isLab && (
+            <LabOnly label="Change the weather (the sky follows)">
+              <div className="flex flex-wrap gap-1.5">
+                {['sunny', 'partlycloudy', 'cloudy', 'rainy', 'pouring', 'lightning-rainy', 'snowy', 'fog'].map((c) => (
+                  <button key={c} type="button" onClick={() => call('lab', 'set_condition', { entity_id: id, condition: c })}
+                    className={`rounded-full px-2.5 py-1 text-xs ${e.state === c ? 'bg-foreground text-background' : 'bg-foreground/5 hover:bg-foreground/10'}`}>{cap(c.replace('-', ' '))}</button>
+                ))}
+              </div>
+            </LabOnly>
+          )}
+        </MoreInfoWeather>
+      )
+    case 'scene':
+      return <MoreInfoScene entity={e} call={call} formatters={formatters} isLab={isLab} />
+    case 'button':
+    case 'input_button':
+      return <MoreInfoButton entity={e} call={call} formatters={formatters} />
+    case 'number':
+    case 'input_number':
+      return <MoreInfoNumber entity={e} call={call} formatters={formatters} />
+    case 'select':
+    case 'input_select':
+      return <MoreInfoSelect entity={e} call={call} formatters={formatters} />
+    case 'text':
+    case 'input_text':
+      return <MoreInfoText entity={e} call={call} formatters={formatters} />
+    case 'date':
+      return <MoreInfoDate entity={e} call={call} formatters={formatters} />
+    case 'time':
+      return <MoreInfoTime entity={e} call={call} formatters={formatters} />
+    case 'datetime':
+      return <MoreInfoDatetime entity={e} call={call} formatters={formatters} />
+    case 'input_datetime':
+      return <MoreInfoInputDatetime entity={e} call={call} formatters={formatters} />
+    case 'update':
+      return <MoreInfoUpdate entity={e} call={call} formatters={formatters} />
+    case 'script':
+      return <MoreInfoScript entity={e} call={call} formatters={formatters} />
+    case 'automation':
+      return <MoreInfoAutomation entity={e} call={call} formatters={formatters} />
+    case 'timer':
+      return <MoreInfoTimer entity={e} call={call} formatters={formatters} />
+    case 'counter':
+      return <MoreInfoCounter entity={e} call={call} formatters={formatters} />
+    case 'sun':
+      return <MoreInfoSun entity={e} formatters={formatters} />
+    case 'group':
+      return <MoreInfoGroup entity={e} entities={entities} formatters={formatters} onSelect={onSelect} />
+
+    /* Lab-only demo cards: gated by `isLab` so they never show on a real Home Assistant connection. */
+    case 'assist_satellite':
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
+      return (
+        <>
+          <BigState text={cap(e.state)} sub={a._said ? `“${a._said}”` : 'Say the wake word, or announce something'} />
+          <Actions items={[
+            { t: 'Wake word', on: e.state === 'listening', go: () => call('assist_satellite', 'start_conversation', { entity_id: id }) },
+            { t: 'Announce', on: e.state === 'responding', go: () => call('assist_satellite', 'announce', { entity_id: id, message: 'Dinner is ready' }) },
+          ]} />
+        </>
+      )
     case 'infrared':
     case 'radio_frequency': {
-      const d = domainOf(id)
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
       const cmds = d === 'infrared' ? ['power', 'cooler', 'warmer'] : ['open', 'close']
       return (
         <>
-          <BigState color={accent(e)} text={a._command ? `Sent “${CMD[String(a._command)] ?? a._command}”` : 'Nothing sent yet'} sub={`Controls ${String(a._target ?? '').split('.')[1]?.replaceAll('_', ' ') ?? ''}`} />
+          <BigState text={a._command ? `Sent “${CMD[String(a._command)] ?? a._command}”` : 'Nothing sent yet'} sub={`Controls ${String(a._target ?? '').split('.')[1]?.replaceAll('_', ' ') ?? ''}`} />
           <Actions items={cmds.map((c) => ({ t: CMD[c]!, go: () => call(d, 'send_command', { entity_id: id, command: c }) }))} />
         </>
       )
     }
-    case 'event': return (
-      <>
-        <BigState color={accent(e)} text={a.event_type ? `${cap(String(a.event_type))}` : 'Nothing yet'} sub={a.event_type ? `Last ${statusOf(e).split(' ').slice(1).join(' ')}` : 'Waiting for the first press'} />
-        <LabOnly label="What the world would do">
-          <button type="button" onClick={() => call('lab', 'fire', { entity_id: id, event_type: ((a.event_types as string[]) ?? ['press'])[0] })} className="w-full rounded-full bg-foreground/5 px-3 py-1.5 text-sm hover:bg-foreground/10">Ring the bell</button>
-        </LabOnly>
-      </>
-    )
-    case 'weather': {
-      const fc = (a._forecast as { day: string; condition: string; temperature: number; templow: number }[]) ?? []
+    case 'notify':
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
       return (
         <>
-          <div className="flex items-end justify-between">
-            <b className="font-mono font-semibold text-4xl">{String(a.temperature)}°</b>
-            <span className="text-right text-muted-foreground text-xs">{cap(e.state.replace('-', ' '))}<br />Feels {String(a.apparent_temperature)}° · {String(a.humidity)}% · {String(a.wind_speed)} km/h</span>
-          </div>
-          <div className="grid grid-cols-4 gap-1.5">
-            {fc.map((f) => (
-              <div key={f.day} className="grid gap-0.5 rounded-xl bg-foreground/5 px-2 py-1.5 text-center text-xs">
-                <span className="text-muted-foreground">{f.day}</span>
-                <b className="font-medium">{cap(f.condition.replace('-', ' '))}</b>
-                <span>{f.temperature}° / {f.templow}°</span>
-              </div>
-            ))}
-          </div>
-          <LabOnly label="Change the weather (the sky follows)">
-            <div className="flex flex-wrap gap-1.5">
-              {['sunny', 'partlycloudy', 'cloudy', 'rainy', 'pouring', 'lightning-rainy', 'snowy', 'fog'].map((c) => (
-                <button key={c} type="button" onClick={() => call('lab', 'set_condition', { entity_id: id, condition: c })}
-                  className={`rounded-full px-2.5 py-1 text-xs ${e.state === c ? 'bg-foreground text-background' : 'bg-foreground/5 hover:bg-foreground/10'}`}>{cap(c.replace('-', ' '))}</button>
-              ))}
-            </div>
-          </LabOnly>
+          {a._last ? <p className="text-muted-foreground text-xs">Last: “{String(a._last)}”</p> : null}
+          <Send placeholder="Message to send" button="Send" onSend={(message) => call('notify', 'send_message', { entity_id: id, message })} />
         </>
       )
-    }
-    case 'scene': {
-      const sets = Object.entries((a._entities ?? {}) as Record<string, [string, Record<string, unknown>]>)
-      return (
-        <>
-          <button type="button" onClick={() => call('scene', 'turn_on', { entity_id: id })} className="rounded-full bg-foreground px-3 py-2 font-medium text-background text-sm">Activate</button>
-          <ul className="grid gap-1 text-xs">
-            {sets.map(([t, [s]]) => <li key={t} className="flex justify-between gap-2"><span className="truncate">{t}</span><span className="text-muted-foreground">{s.replaceAll('_', ' ')}</span></li>)}
-          </ul>
-        </>
-      )
-    }
-    case 'button': return <button type="button" onClick={() => call('button', 'press', { entity_id: id })} className="rounded-full bg-foreground px-3 py-2 font-medium text-background text-sm">Press</button>
-    case 'number': return (
-      <Range label={nameOf(e)} value={Number(e.state)} min={Number(a.min ?? 0)} max={Number(a.max ?? 100)} step={Number(a.step ?? 1)} color={ALERT.info}
-        onCommit={(v) => call('number', 'set_value', { entity_id: id, value: v })} format={(v) => `${v}${a.unit_of_measurement ? ` ${a.unit_of_measurement}` : ''}`} />
-    )
-    case 'select': return <Seg<string> label="Option" value={e.state} onPick={(option) => call('select', 'select_option', { entity_id: id, option })} options={((a.options as string[]) ?? []).map((o) => ({ v: o, t: o }))} />
-    case 'text': return <Send placeholder="New text" initial={e.state} button="Set" onSend={(value) => call('text', 'set_value', { entity_id: id, value })} />
-    case 'date': return <Send type="date" initial={e.state} button="Set" onSend={(value) => call('date', 'set_value', { entity_id: id, date: value })} />
-    case 'time': return <Send type="time" initial={e.state.slice(0, 5)} button="Set" onSend={(value) => call('time', 'set_value', { entity_id: id, time: `${value}:00` })} />
-    case 'datetime': return <Send type="datetime-local" initial={e.state.slice(0, 16)} button="Set" onSend={(value) => call('datetime', 'set_value', { entity_id: id, datetime: `${value}:00` })} />
-    case 'update': return (
-      <>
-        <div className="grid grid-cols-2 gap-2">
-          <Stat k="Installed" v={String(a.installed_version)} />
-          <Stat k="Latest" v={String(a.latest_version)} />
-        </div>
-        {a.release_summary ? <p className="text-muted-foreground text-xs">{String(a.release_summary)}</p> : null}
-        {a.in_progress ? (
-          <div className="h-2 overflow-hidden rounded-full bg-foreground/10"><i className="block h-full bg-foreground transition-[width]" style={{ width: `${Number(a.update_percentage ?? 0)}%` }} /></div>
-        ) : e.state === 'on' ? (
-          <Actions items={[{ t: 'Install', go: () => call('update', 'install', { entity_id: id }) }, { t: 'Skip', go: () => call('update', 'skip', { entity_id: id }) }]} />
-        ) : <span className="text-muted-foreground text-sm">Up to date</span>}
-      </>
-    )
-    case 'notify': return (
-      <>
-        {a._last ? <p className="text-muted-foreground text-xs">Last: “{String(a._last)}”</p> : null}
-        <Send placeholder="Message to send" button="Send" onSend={(message) => call('notify', 'send_message', { entity_id: id, message })} />
-      </>
-    )
     case 'calendar': {
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
       const evs = ((a._events ?? []) as { summary: string; start: number; end: number; location?: string }[]).filter((v) => v.end > Date.now()).sort((x, y) => x.start - y.start)
       return (
         <>
@@ -725,6 +504,7 @@ function Controls({ e, call, formatters, history, layer, onLayer, areas }: { e: 
       )
     }
     case 'todo': {
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
       const items = (a._items ?? []) as { summary: string; status: string }[]
       return (
         <>
@@ -744,6 +524,7 @@ function Controls({ e, call, formatters, history, layer, onLayer, areas }: { e: 
       )
     }
     case 'timer_list': {
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
       const list = (a._timers ?? []) as { id: string; name: string; remaining: number; paused: boolean }[]
       const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
       return (
@@ -765,78 +546,68 @@ function Controls({ e, call, formatters, history, layer, onLayer, areas }: { e: 
         </>
       )
     }
-    case 'conversation': return (
-      <>
-        {a._last ? (
-          <div className="grid gap-1.5 text-sm">
-            <span className="justify-self-end rounded-2xl rounded-br-sm bg-foreground px-3 py-1.5 text-background">{String(a._last)}</span>
-            <span className="justify-self-start rounded-2xl rounded-bl-sm bg-foreground/5 px-3 py-1.5">{String(a._reply ?? '…')}</span>
-          </div>
-        ) : <p className="text-muted-foreground text-xs">Try “turn off the lounge pendant”, “lock the front door”, “temperature in the studio” or “who is home”.</p>}
-        <Send placeholder="Ask Assist" button="Send" clear onSend={(text) => call('conversation', 'process', { entity_id: id, text })} />
-      </>
-    )
+    case 'conversation':
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
+      return (
+        <>
+          {a._last ? (
+            <div className="grid gap-1.5 text-sm">
+              <span className="justify-self-end rounded-2xl rounded-br-sm bg-foreground px-3 py-1.5 text-background">{String(a._last)}</span>
+              <span className="justify-self-start rounded-2xl rounded-bl-sm bg-foreground/5 px-3 py-1.5">{String(a._reply ?? '…')}</span>
+            </div>
+          ) : <p className="text-muted-foreground text-xs">Try “turn off the lounge pendant”, “lock the front door”, “temperature in the studio” or “who is home”.</p>}
+          <Send placeholder="Ask Assist" button="Send" clear onSend={(text) => call('conversation', 'process', { entity_id: id, text })} />
+        </>
+      )
     case 'tts': {
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
       const speakers = (a._speakers as string[]) ?? []
       return <Send placeholder="Something to say" button="Speak" clear onSend={(message) => call('tts', 'speak', { entity_id: id, media_player_entity_id: speakers[0] ?? '', message })} />
     }
-    case 'stt': return <Stat k="Languages" v={((a._languages as string[]) ?? []).join(', ')} />
-    case 'wake_word': return (
-      <>
-        <Stat k="Listening for" v={((a._words as string[]) ?? []).join(' · ')} />
-        <LabOnly label="What the world would do">
-          <button type="button" onClick={() => call('wake_word', 'detect', { entity_id: id })} className="w-full rounded-full bg-foreground/5 px-3 py-1.5 text-sm hover:bg-foreground/10">Say “{((a._words as string[]) ?? ['Okay Nabu'])[0]}”</button>
-        </LabOnly>
-      </>
-    )
-    case 'ai_task': return (
-      <>
-        {a._result ? <p className="rounded-xl bg-foreground/5 px-3 py-2 text-sm">{String(a._result)}</p> : null}
-        <button type="button" onClick={() => call('ai_task', 'generate_data', { entity_id: id, task_name: 'summary', instructions: 'Summarise the home right now' })} className="rounded-full bg-foreground px-3 py-2 font-medium text-background text-sm">Summarise my home</button>
-      </>
-    )
-    case 'image': return (
-      <>
-        <Snapshot seed={Number(a._seed ?? 0)} caption={String(a._caption ?? '')} />
-        <span className="text-muted-foreground text-xs">{String(a._caption ?? '')} · {statusOf({ ...e, entity_id: 'button.x' }).replace('Last ', '')}</span>
-      </>
-    )
-    case 'image_processing': return <BigState color={accent(e)} text={`${e.state} ${String(a._label ?? 'found')}`} sub={`In the ${String(a._area ?? '')}, seen by the camera`} />
-    case 'geo_location': return (
-      <div className="grid grid-cols-2 gap-2">
-        <Stat k="Distance" v={`${e.state} km`} />
-        <Stat k="Source" v={cap(String(a.source ?? ''))} />
-      </div>
-    )
-    case 'air_quality': return (
-      <div className="grid grid-cols-2 gap-2">
-        <Stat k="PM2.5" v={`${e.state} µg/m³`} />
-        <Stat k="PM10" v={`${a.particulate_matter_10} µg/m³`} />
-        <Stat k="Ozone" v={`${a.ozone} µg/m³`} />
-        <Stat k="NO₂" v={`${a.nitrogen_dioxide} µg/m³`} />
-      </div>
-    )
-    default: {
-      const k = fieldOf(e)
-      if (!k) return <Stat k="Reading" v={`${e.state} ${a.unit_of_measurement ?? ''}`} />
-      const v = Number(e.state)
-      const c = fieldColor(k, v)
-      const first = history[0] ?? v
-      const delta = v - first
+    case 'stt':
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
+      return <Stat k="Languages" v={((a._languages as string[]) ?? []).join(', ')} />
+    case 'wake_word':
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
       return (
         <>
-          <div className="flex items-end justify-between">
-            <b className="font-mono font-semibold text-4xl">{v.toFixed(FIELDS[k].digits)}<small className="ml-1 text-base">{a.unit_of_measurement ?? FIELDS[k].unit}</small></b>
-            <span className="text-right text-muted-foreground text-xs">{Math.abs(delta) < 10 ** -FIELDS[k].digits ? 'Steady' : `${delta > 0 ? '+' : '−'}${Math.abs(delta).toFixed(FIELDS[k].digits)} in 1 min`}</span>
-          </div>
-          <Spark data={history} color={c} />
-          <button type="button" onClick={() => onLayer(layer === k ? null : k)} aria-pressed={layer === k}
-            className={`rounded-full border px-3 py-1.5 text-sm ${layer === k ? 'border-transparent bg-foreground text-background' : 'border-border hover:bg-foreground/5'}`}>
-            {layer === k ? `Showing ${FIELDS[k].label.toLowerCase()} on the floor` : `Show ${FIELDS[k].label.toLowerCase()} on the floor`}
-          </button>
+          <Stat k="Listening for" v={((a._words as string[]) ?? []).join(' · ')} />
+          <LabOnly label="What the world would do">
+            <button type="button" onClick={() => call('wake_word', 'detect', { entity_id: id })} className="w-full rounded-full bg-foreground/5 px-3 py-1.5 text-sm hover:bg-foreground/10">Say “{((a._words as string[]) ?? ['Okay Nabu'])[0]}”</button>
+          </LabOnly>
         </>
       )
-    }
+    case 'ai_task':
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
+      return (
+        <>
+          {a._result ? <p className="rounded-xl bg-foreground/5 px-3 py-2 text-sm">{String(a._result)}</p> : null}
+          <button type="button" onClick={() => call('ai_task', 'generate_data', { entity_id: id, task_name: 'summary', instructions: 'Summarise the home right now' })} className="rounded-full bg-foreground px-3 py-2 font-medium text-background text-sm">Summarise my home</button>
+        </>
+      )
+    case 'image_processing':
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
+      return <BigState text={`${e.state} ${String(a._label ?? 'found')}`} sub={`In the ${String(a._area ?? '')}, seen by the camera`} />
+    case 'geo_location':
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <Stat k="Distance" v={`${e.state} km`} />
+          <Stat k="Source" v={cap(String(a.source ?? ''))} />
+        </div>
+      )
+    case 'air_quality':
+      if (!isLab) return <MoreInfoDefault entity={e} formatters={formatters} />
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <Stat k="PM2.5" v={`${e.state} µg/m³`} />
+          <Stat k="PM10" v={`${a.particulate_matter_10} µg/m³`} />
+          <Stat k="Ozone" v={`${a.ozone} µg/m³`} />
+          <Stat k="NO₂" v={`${a.nitrogen_dioxide} µg/m³`} />
+        </div>
+      )
+    default:
+      return <MoreInfoDefault entity={e} formatters={formatters} history={history} layer={layer} onLayer={onLayer} />
   }
 }
 
@@ -861,7 +632,7 @@ function useHistory(entities: HassEntities) {
   return hist
 }
 
-export function HomePanel({ title, devices, areas, entities, selected, lastCall, notice, layer, pins, onSelect, onGroup, call, onLayer }: {
+export function HomePanel({ title, devices, areas, entities, selected, lastCall, notice, layer, pins, onSelect, onGroup, call, onLayer, isLab = false }: {
   notice?: { text: string; at: number } | null
   /** A grouped pin was clicked: the devices under it, for the camera to zoom in on. */
   onGroup?: (entityIds: string[]) => void
@@ -876,6 +647,7 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
   onSelect: (id: string | null) => void
   call: Call
   onLayer: (k: FieldKind | null) => void
+  isLab?: boolean
 }) {
   const history = useHistory(entities)
   // an automation that just ran shows as a toast for a few seconds
@@ -1059,14 +831,21 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
               <b className="truncate font-semibold">{nameOf(sel)}</b>
               <small className="truncate text-muted-foreground text-xs">{areas.find((a) => a.id === devices.find((d) => d.entityId === sel.entity_id)?.anchor.area)?.name ?? 'Home'} · {sel.entity_id}</small>
             </span>
-            {toggles(sel) && domainOf(sel.entity_id) !== 'climate' && <Switch on={isOn(sel)} label={`${nameOf(sel)} power`} onChange={() => toggle(sel)} />}
+            {toggles(sel) && !HIDE_HEADER_SWITCH.has(domainOf(sel.entity_id)) && <Switch on={isOn(sel)} label={`${nameOf(sel)} power`} onChange={() => toggle(sel)} />}
           </header>
           <div className="grid gap-4">
-            <Controls e={sel} call={call} formatters={formatters} history={history[sel.entity_id] ?? []} layer={layer} onLayer={onLayer} areas={areas} />
+            <Controls e={sel} entities={entities} call={call} formatters={formatters} history={history[sel.entity_id] ?? []} layer={layer} onLayer={onLayer} onSelect={onSelect} areas={areas} isLab={isLab} />
+            <EntityDetails entity={sel} formatters={formatters} />
           </div>
           {lastCall?.data.entity_id === sel.entity_id && (
             <code className="block overflow-x-auto whitespace-nowrap rounded-lg bg-foreground/5 px-3 py-2 font-mono text-[11px] text-muted-foreground">
-              {lastCall.source === 'automation' ? 'automation → ' : ''}{describeCall(lastCall)}
+              {lastCall.source === 'automation' ? 'automation → ' : ''}
+              {describeCall({
+                ...lastCall,
+                data: Object.fromEntries(
+                  Object.entries(lastCall.data).filter(([k]) => k !== 'code'),
+                ) as ServiceCall['data'],
+              })}
             </code>
           )}
         </section>

@@ -11,7 +11,7 @@ import {
   subscribeEntities,
 } from 'home-assistant-js-websocket'
 import { create } from 'zustand'
-import { domainOf, type HassEntities } from '../entities'
+import type { HassEntities } from '../entities'
 import { takeHassCallback } from './callback'
 
 /* The viewer's connection to the visitor's own Home Assistant: its sign-in (Home Assistant's own
@@ -26,18 +26,45 @@ const PENDING_KEY = 'pascal-ha-pending'
 
 export type HassStatus = 'idle' | 'redirecting' | 'connecting' | 'connected' | 'error'
 
-/** Per-entity metadata from Home Assistant's entity registry, used to resolve translations and icons. */
+export type EntityRegistryOptions = {
+  sensor?: { display_precision?: number | null }
+  light?: { favorite_colors?: unknown[] }
+  cover?: { favorite_positions?: number[]; favorite_tilt_positions?: number[] }
+  valve?: { favorite_positions?: number[] }
+}
+
+/** Per-entity metadata from Home Assistant's entity registry, used to resolve translations, icons and sibling device entities. */
 export type EntityRegistryInfo = {
   platform: string
   translation_key?: string | null
   display_precision?: number | null
+  device_id?: string | null
+  icon?: string | null
+  options?: EntityRegistryOptions
+}
+
+export type UnitSystem = {
+  temperature: string
+  length: string
+  pressure: string
+  wind_speed: string
+  accumulated_precipitation: string
+}
+
+export const DEFAULT_UNIT_SYSTEM: UnitSystem = {
+  temperature: '°C',
+  length: 'km',
+  pressure: 'hPa',
+  wind_speed: 'km/h',
+  accumulated_precipitation: 'mm',
 }
 
 /** Icon translation entry shape returned by Home Assistant's `frontend/get_icons`. */
 export type IconTranslationEntry = {
   default?: string
   state?: Record<string, string>
-  state_attributes?: Record<string, { default?: string; state?: Record<string, string> }>
+  range?: Record<string, string>
+  state_attributes?: Record<string, { default?: string; state?: Record<string, string>; range?: Record<string, string> }>
 }
 
 export type HassIcons = {
@@ -60,9 +87,10 @@ type HassState = {
   areaOf: Record<string, string>
   /** Each entity's platform and translation key, from Home Assistant's entity registry. */
   registryOf: Record<string, EntityRegistryInfo>
-  /** Home Assistant's configured language (e.g. 'en') and temperature unit ('°C' or '°F'). */
+  /** Home Assistant's configured language (e.g. 'en'), temperature unit ('°C' or '°F') and full unit system. */
   language: string
   temperatureUnit: string
+  unitSystem: UnitSystem
   /** Flat dotted translation map from `frontend/get_translations` (entity_component + entity). */
   translations: Record<string, string>
   /** Icon maps from `frontend/get_icons` (entity_component + entity). */
@@ -141,7 +169,8 @@ type Registry = {
     device_id: string | null
     platform?: string
     translation_key?: string | null
-    options?: { sensor?: { display_precision?: number | null } }
+    icon?: string | null
+    options?: EntityRegistryOptions
   }[]
 }
 
@@ -162,11 +191,14 @@ async function readRegistry(connection: Connection): Promise<{
     const id = e.area_id ?? (e.device_id ? deviceArea.get(e.device_id) : null)
     const name = id ? areaName.get(id) : undefined
     if (name) areaOf[e.entity_id] = name
-    if (e.platform) {
+    if (e.platform || e.device_id || e.icon || e.options) {
       registryOf[e.entity_id] = {
-        platform: e.platform,
+        platform: e.platform ?? '',
         translation_key: e.translation_key ?? null,
         display_precision: e.options?.sensor?.display_precision ?? null,
+        device_id: e.device_id ?? null,
+        icon: e.icon ?? null,
+        options: e.options,
       }
     }
   }
@@ -175,7 +207,7 @@ async function readRegistry(connection: Connection): Promise<{
 
 type HassConfigResponse = {
   language?: string
-  unit_system?: { temperature?: string }
+  unit_system?: Partial<UnitSystem>
   components?: string[]
 }
 
@@ -187,23 +219,28 @@ function platformsForTranslations(registryOf: Record<string, EntityRegistryInfo>
   return [...set].sort()
 }
 
-function climatePlatforms(registryOf: Record<string, EntityRegistryInfo>): string[] {
-  const set = new Set<string>()
-  for (const [entityId, info] of Object.entries(registryOf)) {
-    if (domainOf(entityId) === 'climate' && info.platform) set.add(info.platform)
-  }
-  return [...set].sort()
-}
-
-async function readConfig(connection: Connection): Promise<{ language: string; temperatureUnit: string }> {
+async function readConfig(connection: Connection): Promise<{
+  language: string
+  temperatureUnit: string
+  unitSystem: UnitSystem
+}> {
   try {
     const cfg = await connection.sendMessagePromise<HassConfigResponse>({ type: 'get_config' })
+    const unitSystem: UnitSystem = {
+      temperature: cfg.unit_system?.temperature || DEFAULT_UNIT_SYSTEM.temperature,
+      length: cfg.unit_system?.length || DEFAULT_UNIT_SYSTEM.length,
+      pressure: cfg.unit_system?.pressure || DEFAULT_UNIT_SYSTEM.pressure,
+      wind_speed: cfg.unit_system?.wind_speed || DEFAULT_UNIT_SYSTEM.wind_speed,
+      accumulated_precipitation:
+        cfg.unit_system?.accumulated_precipitation || DEFAULT_UNIT_SYSTEM.accumulated_precipitation,
+    }
     return {
       language: cfg.language || 'en',
-      temperatureUnit: cfg.unit_system?.temperature || '°C',
+      temperatureUnit: unitSystem.temperature,
+      unitSystem,
     }
   } catch {
-    return { language: 'en', temperatureUnit: '°C' }
+    return { language: 'en', temperatureUnit: DEFAULT_UNIT_SYSTEM.temperature, unitSystem: DEFAULT_UNIT_SYSTEM }
   }
 }
 
@@ -239,7 +276,7 @@ async function readTranslations(
   return out
 }
 
-async function readClimateIcons(connection: Connection, platforms: string[]): Promise<HassIcons> {
+async function readIcons(connection: Connection, platforms: string[]): Promise<HassIcons> {
   const entity_component: HassIcons['entity_component'] = {}
   const entity: HassIcons['entity'] = {}
   try {
@@ -248,9 +285,8 @@ async function readClimateIcons(connection: Connection, platforms: string[]): Pr
     }>({
       type: 'frontend/get_icons',
       category: 'entity_component',
-      integration: 'climate',
     })
-    if (comp?.resources?.climate) entity_component.climate = comp.resources.climate
+    if (comp?.resources) Object.assign(entity_component, comp.resources)
   } catch {
     // Fall back to static named-import icon table.
   }
@@ -282,15 +318,15 @@ export const useHass = create<HassState>((set, get) => {
     set({ status: 'connecting', error: null, hassUrl: auth.data.hassUrl })
     try {
       const connection = await createConnection({ auth })
-      const [{ areaOf, registryOf }, { language, temperatureUnit }] = await Promise.all([
+      const [{ areaOf, registryOf }, { language, temperatureUnit, unitSystem }] = await Promise.all([
         readRegistry(connection),
         readConfig(connection),
       ])
-      let loadedTranslationKey = platformsForTranslations(registryOf).join(',')
-      let loadedIconKey = climatePlatforms(registryOf).join(',')
+      const initialPlatforms = platformsForTranslations(registryOf)
+      let loadedPlatformKey = initialPlatforms.join(',')
       const [translations, icons] = await Promise.all([
-        readTranslations(connection, language, platformsForTranslations(registryOf)),
-        readClimateIcons(connection, climatePlatforms(registryOf)),
+        readTranslations(connection, language, initialPlatforms),
+        readIcons(connection, initialPlatforms),
       ])
       unsubscribe?.()
       unsubscribe = subscribeEntities(connection, (entities) => set({ entities: entities as unknown as HassEntities }))
@@ -299,31 +335,41 @@ export const useHass = create<HassState>((set, get) => {
       const reread = () => {
         window.clearTimeout(pending)
         pending = window.setTimeout(() => {
-          void readRegistry(connection).then(async ({ areaOf: a, registryOf: r }) => {
-            set({ areaOf: a, registryOf: r })
-            const nextTransPlatforms = platformsForTranslations(r)
-            const nextTransKey = nextTransPlatforms.join(',')
-            const nextIconPlatforms = climatePlatforms(r)
-            const nextIconKey = nextIconPlatforms.join(',')
-            const lang = get().language
-            if (nextTransKey !== loadedTranslationKey) {
-              loadedTranslationKey = nextTransKey
-              const nextTranslations = await readTranslations(connection, lang, nextTransPlatforms)
-              set({ translations: nextTranslations })
-            }
-            if (nextIconKey !== loadedIconKey) {
-              loadedIconKey = nextIconKey
-              const nextIcons = await readClimateIcons(connection, nextIconPlatforms)
-              set({ icons: nextIcons })
-            }
-          })
+          void readRegistry(connection)
+            .then(async ({ areaOf: a, registryOf: r }) => {
+              set({ areaOf: a, registryOf: r })
+              const nextPlatforms = platformsForTranslations(r)
+              const nextKey = nextPlatforms.join(',')
+              const lang = get().language
+              if (nextKey !== loadedPlatformKey) {
+                loadedPlatformKey = nextKey
+                const [nextTranslations, nextIcons] = await Promise.all([
+                  readTranslations(connection, lang, nextPlatforms),
+                  readIcons(connection, nextPlatforms),
+                ])
+                set({ translations: nextTranslations, icons: nextIcons })
+              }
+            })
+            .catch(() => {
+              // Registry reread failed; keep existing data rather than breaking the connection.
+            })
         }, 400)
       }
       connection.addEventListener('ready', reread)
       for (const event of ['area_registry_updated', 'device_registry_updated', 'entity_registry_updated']) {
         void connection.subscribeEvents(reread, event)
       }
-      set({ status: 'connected', connection, areaOf, registryOf, language, temperatureUnit, translations, icons })
+      set({
+        status: 'connected',
+        connection,
+        areaOf,
+        registryOf,
+        language,
+        temperatureUnit,
+        unitSystem,
+        translations,
+        icons,
+      })
     } catch (failure) {
       if (failure === ERR_INVALID_AUTH) saveTokens(null)
       set({ status: 'error', error: explain(failure, auth.data.hassUrl), connection: null })
@@ -338,7 +384,8 @@ export const useHass = create<HassState>((set, get) => {
     areaOf: {},
     registryOf: {},
     language: 'en',
-    temperatureUnit: '°C',
+    temperatureUnit: DEFAULT_UNIT_SYSTEM.temperature,
+    unitSystem: DEFAULT_UNIT_SYSTEM,
     translations: {},
     icons: EMPTY_ICONS,
     connection: null,
@@ -397,7 +444,8 @@ export const useHass = create<HassState>((set, get) => {
         areaOf: {},
         registryOf: {},
         language: 'en',
-        temperatureUnit: '°C',
+        temperatureUnit: DEFAULT_UNIT_SYSTEM.temperature,
+        unitSystem: DEFAULT_UNIT_SYSTEM,
         translations: {},
         icons: EMPTY_ICONS,
         error: null,

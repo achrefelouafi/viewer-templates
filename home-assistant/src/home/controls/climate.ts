@@ -6,41 +6,21 @@
    - src/resources/theme/color/color.globals.ts */
 
 import {
-  mdiAccountArrowRight,
-  mdiArrowAll,
-  mdiArrowLeftRight,
-  mdiArrowOscillating,
-  mdiArrowOscillatingOff,
-  mdiArrowUpDown,
-  mdiBed,
-  mdiCircleMedium,
   mdiFan,
-  mdiFanAuto,
-  mdiFanOff,
-  mdiFanSpeed1,
-  mdiFanSpeed2,
-  mdiFanSpeed3,
   mdiFire,
-  mdiHome,
-  mdiLeaf,
-  mdiMotionSensor,
   mdiPower,
-  mdiRocketLaunch,
   mdiSnowflake,
-  mdiSofa,
-  mdiSpeedometer,
-  mdiSpeedometerMedium,
-  mdiSpeedometerSlow,
   mdiSunSnowflakeVariant,
-  mdiThermometer,
   mdiThermostat,
   mdiThermostatAuto,
-  mdiTuneVariant,
   mdiWaterPercent,
-  mdiWeatherWindy,
 } from '@mdi/js'
 import type { HassEntity } from '../entities'
 import type { EntityFormatters } from '../hass/names'
+import { resolveAttributeIcon } from './icons'
+import { HA_COLORS, supportsFeature, UNAVAILABLE, UNKNOWN } from './stateColors'
+
+export { supportsFeature, UNAVAILABLE, UNKNOWN }
 
 export const ClimateEntityFeature = {
   TARGET_TEMPERATURE: 1,
@@ -67,13 +47,6 @@ export type HvacAction =
   | 'idle'
   | 'off'
   | 'preheating'
-
-export const UNAVAILABLE = 'unavailable'
-export const UNKNOWN = 'unknown'
-
-export function supportsFeature(stateObj: HassEntity, feature: number): boolean {
-  return (Number(stateObj.attributes.supported_features ?? 0) & feature) !== 0
-}
 
 export function climateStateActive(state: string): boolean {
   return state !== 'off' && state !== UNAVAILABLE && state !== UNKNOWN
@@ -102,14 +75,14 @@ export const CLIMATE_HVAC_ACTION_TO_MODE: Readonly<Record<string, HvacMode>> = {
 
 /** Exact Home Assistant climate/humidifier state hex colors from color.globals.ts. */
 export const HA_CLIMATE_COLORS = {
-  auto: '#4caf50',
-  cool: '#2196f3',
-  dry: '#ff9800',
-  fan_only: '#00bcd4',
-  heat: '#ff6f22',
-  heat_cool: '#ffc107',
-  inactive: '#9e9e9e',
-  humidifierOn: '#2196f3',
+  auto: HA_COLORS.green,
+  cool: HA_COLORS.blue,
+  dry: HA_COLORS.orange,
+  fan_only: HA_COLORS.cyan,
+  heat: HA_COLORS.deepOrange,
+  heat_cool: HA_COLORS.amber,
+  inactive: HA_COLORS.inactive,
+  humidifierOn: HA_COLORS.blue,
 } as const
 
 export function climateStateColor(state: string): string {
@@ -152,78 +125,6 @@ export function climateHvacModeIcon(mode: string): string {
   return CLIMATE_HVAC_MODE_ICONS[mode] ?? mdiThermostat
 }
 
-/** Static named-import lookup table for `mdi:*` names returned by `frontend/get_icons`. */
-const MDI_BY_NAME: Readonly<Record<string, string>> = {
-  'mdi:account-arrow-right': mdiAccountArrowRight,
-  'mdi:arrow-all': mdiArrowAll,
-  'mdi:arrow-left-right': mdiArrowLeftRight,
-  'mdi:arrow-oscillating': mdiArrowOscillating,
-  'mdi:arrow-oscillating-off': mdiArrowOscillatingOff,
-  'mdi:arrow-up-down': mdiArrowUpDown,
-  'mdi:bed': mdiBed,
-  'mdi:circle-medium': mdiCircleMedium,
-  'mdi:fan': mdiFan,
-  'mdi:fan-auto': mdiFanAuto,
-  'mdi:fan-off': mdiFanOff,
-  'mdi:fan-speed-1': mdiFanSpeed1,
-  'mdi:fan-speed-2': mdiFanSpeed2,
-  'mdi:fan-speed-3': mdiFanSpeed3,
-  'mdi:fire': mdiFire,
-  'mdi:home': mdiHome,
-  'mdi:leaf': mdiLeaf,
-  'mdi:motion-sensor': mdiMotionSensor,
-  'mdi:power': mdiPower,
-  'mdi:rocket-launch': mdiRocketLaunch,
-  'mdi:snowflake': mdiSnowflake,
-  'mdi:sofa': mdiSofa,
-  'mdi:speedometer': mdiSpeedometer,
-  'mdi:speedometer-medium': mdiSpeedometerMedium,
-  'mdi:speedometer-slow': mdiSpeedometerSlow,
-  'mdi:sun-snowflake-variant': mdiSunSnowflakeVariant,
-  'mdi:thermometer': mdiThermometer,
-  'mdi:thermostat': mdiThermostat,
-  'mdi:thermostat-auto': mdiThermostatAuto,
-  'mdi:tune-variant': mdiTuneVariant,
-  'mdi:water-percent': mdiWaterPercent,
-  'mdi:weather-windy': mdiWeatherWindy,
-}
-
-/** Offline fallback attribute value icons matching Home Assistant's climate component icons.json. */
-const STATIC_CLIMATE_ATTRIBUTE_ICONS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  preset_mode: {
-    none: mdiCircleMedium,
-    eco: mdiLeaf,
-    away: mdiAccountArrowRight,
-    boost: mdiRocketLaunch,
-    comfort: mdiSofa,
-    home: mdiHome,
-    sleep: mdiBed,
-    activity: mdiMotionSensor,
-  },
-  fan_mode: {
-    off: mdiFanOff,
-    auto: mdiFanAuto,
-    on: mdiFan,
-    low: mdiSpeedometerSlow,
-    medium: mdiSpeedometerMedium,
-    middle: mdiSpeedometerMedium,
-    high: mdiSpeedometer,
-    top: mdiSpeedometer,
-    diffuse: mdiWeatherWindy,
-  },
-  swing_mode: {
-    off: mdiArrowOscillatingOff,
-    on: mdiArrowOscillating,
-    vertical: mdiArrowUpDown,
-    horizontal: mdiArrowLeftRight,
-    both: mdiArrowAll,
-  },
-  swing_horizontal_mode: {
-    off: mdiArrowOscillatingOff,
-    on: mdiArrowOscillating,
-  },
-}
-
 /**
  * Resolves a climate attribute value icon: first via Home Assistant's `frontend/get_icons`
  * (`entity` then `entity_component`) mapped through the static named-import table, then via the
@@ -236,14 +137,5 @@ export function resolveClimateAttributeIcon(
   formatters: EntityFormatters,
   fallbackPath: string,
 ): string {
-  const iconName = formatters.resolveAttributeIconName(entity, attribute, value)
-  if (iconName) {
-    const resolved = MDI_BY_NAME[iconName]
-    if (resolved) return resolved
-  }
-  if (value !== undefined) {
-    const builtIn = STATIC_CLIMATE_ATTRIBUTE_ICONS[attribute]?.[value]
-    if (builtIn) return builtIn
-  }
-  return fallbackPath
+  return resolveAttributeIcon(entity, attribute, value, formatters, fallbackPath)
 }
