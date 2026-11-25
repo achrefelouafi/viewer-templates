@@ -7,7 +7,6 @@ import {
   setWindowShuttersOpenState,
   useScene,
 } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
@@ -51,12 +50,6 @@ export function usePascalDoor(nodeId: string | undefined, open: boolean, cover =
   }, [nodeId, open, cover])
 }
 
-/** How much daylight there is outside, 0 (night) to 1 (midday), from the viewer's time of day. */
-function useDaylight() {
-  const t = useViewer((s) => s.timeOfDay)
-  return t === 'midday' ? 1 : t === 'golden' ? 0.75 : t === 'blue' ? 0.25 : 0.05
-}
-
 /* ---------------- covers: blinds, curtains, shutters, garage doors ---------------- */
 
 /** Family "model", for a device linked to a Pascal door or window: the model opens and closes with
@@ -72,47 +65,10 @@ export function ModelOpening({ entity, device }: FamilyProps) {
   return null
 }
 
-/** Family "opening": daylight falls through the cover as far as it is open (warm by day, nothing at
-    night), and its edge glows while it travels. The cover itself moves in its own model. */
-export function OpeningEffect({ entity, device, floorY }: FamilyProps) {
-  const { position, rotationY, size = [0.1, 1.4, 1.2] } = device.anchor
-  const [, h, w] = size
-  const day = useDaylight()
-  const shaft = useMemo(() => beamMaterial(), [])
-  const patch = useMemo(() => ringsMaterial(), [])
-  const edge = useMemo(() => frameMaterial(), [])
-  const k = useRef(0)
-  const move = useRef(0)
-  useFrame((st, dt) => {
-    k.current = approach(k.current, openness(entity) * day, dt, 3)
-    const moving = entity.state === 'opening' || entity.state === 'closing'
-    move.current = approach(move.current, moving ? 1 : 0, dt, 6)
-    set(shaft, 'uColor', day > 0.5 ? '#fff1d6' : '#ffc98a')
-    shaft.uniforms.uA.value = k.current * 0.5
-    set(patch, 'uColor', '#fff1d6')
-    patch.uniforms.uA.value = k.current * 0.5
-    patch.uniforms.uFill.value = 1
-    patch.uniforms.uRing.value = 0
-    set(edge, 'uColor', ALERT.info)
-    edge.uniforms.uA.value = move.current * 0.9
-    edge.uniforms.uT.value = st.clock.elapsedTime
-    edge.uniforms.uPulse.value = 1
-  })
-  const fall = position[1] - floorY
-  return (
-    <group position={position} rotation-y={rotationY}>
-      {/* the shaft leans in from the window and down to the floor */}
-      <mesh position={[fall * 0.55, -fall * 0.45, 0]} rotation-z={Math.PI / 2 - 0.85} material={shaft} renderOrder={6}>
-        <planeGeometry args={[w, fall * 1.5]} />
-      </mesh>
-      <mesh position={[fall * 1.1, floorY - position[1] + 0.03, 0]} rotation-x={-Math.PI / 2} scale={[1.3, 0.9, 1]} material={patch} renderOrder={5}>
-        <planeGeometry args={[w * 1.6, w * 1.6]} />
-      </mesh>
-      <mesh position={[0.06, 0, 0]} rotation-y={Math.PI / 2} material={edge}>
-        <planeGeometry args={[w + 0.08, h + 0.08]} />
-      </mesh>
-    </group>
-  )
+/** Family "opening": a blind, curtain or shutter moves in its own model (Pascal's animation); no
+    light or glow is drawn on the opening. */
+export function OpeningEffect(_props: FamilyProps) {
+  return null
 }
 
 /* ---------------- locks ---------------- */
@@ -151,30 +107,11 @@ export function LockEffect({ entity, device }: FamilyProps) {
 
 /* ---------------- door and window contacts ---------------- */
 
-/** Family "contact": an amber frame round the opening while it is open; a door sensor linked to a
-    Pascal door swings it too. */
+/** Family "contact": a door sensor linked to a Pascal door swings it; nothing is drawn on the
+    opening. */
 export function ContactEffect({ entity, device }: FamilyProps) {
-  const { size = [0.1, 2.1, 1] } = device.anchor
-  const frame = useMemo(() => frameMaterial(), [])
-  const k = useRef(0)
   usePascalDoor(device.nodeId, tripped(entity))
-  useFrame((st, dt) => {
-    k.current = approach(k.current, tripped(entity) ? 1 : 0, dt, 4)
-    set(frame, 'uColor', ALERT.warn)
-    frame.uniforms.uA.value = k.current
-    frame.uniforms.uT.value = st.clock.elapsedTime
-    frame.uniforms.uPulse.value = 0.4
-    frame.uniforms.uWidth.value = 0.05
-  })
-  return (
-    <group position={device.anchor.position} rotation-y={device.anchor.rotationY}>
-      {[1, -1].map((s) => (
-        <mesh key={s} position={[s * 0.08, 0, 0]} rotation-y={Math.PI / 2} material={frame}>
-          <planeGeometry args={[size[2] + 0.1, size[1] + 0.1]} />
-        </mesh>
-      ))}
-    </group>
-  )
+  return null
 }
 
 /* ---------------- smoke, gas and CO ---------------- */
