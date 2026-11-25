@@ -1,3 +1,5 @@
+import { emitter } from '@pascal-app/core'
+import { framedLookAt } from '@pascal-app/viewer/ui'
 import { OrbitControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
@@ -9,7 +11,9 @@ import type { HomeDevice } from './entities'
 export type CameraView = { position: THREE.Vector3; target: THREE.Vector3 }
 
 /** Orbit controls that fly to the chosen device (looking at it from in front) and back out again,
-    or close in on a group of pins until they separate. Shared by the lab and the project viewer. */
+    close in on a group of pins until they separate, or frame what Pascal's viewer asks to frame (a
+    room, a floor, the building, from the explore panel) with Pascal's own framing. Shared by the lab
+    and the project viewer. */
 export function CameraRig({ device, group, home }: { device: HomeDevice | null; group: THREE.Vector3[] | null; home: CameraView }) {
   const controls = useRef<OrbitControlsImpl>(null)
   const camera = useThree((s) => s.camera)
@@ -48,6 +52,23 @@ export function CameraRig({ device, group, home }: { device: HomeDevice | null; 
     flying.current = 1.4
     invalidate()
   }, [group, camera, wantPos, wantTgt, invalidate])
+
+  // Pascal's framing requests (`frameViewerNode`): this rig owns the camera, so it flies there itself
+  useEffect(() => {
+    const onFrame = (event: Parameters<typeof framedLookAt>[0]) => {
+      const c = controls.current
+      if (!c) return
+      const fov = (camera as THREE.PerspectiveCamera).isPerspectiveCamera ? (camera as THREE.PerspectiveCamera).fov : undefined
+      const pose = framedLookAt(event, { position: camera.position.toArray(), target: c.target.toArray() }, fov)
+      if (!pose) return
+      wantPos.set(...pose.position)
+      wantTgt.set(...pose.target)
+      flying.current = 1.4
+      invalidate()
+    }
+    emitter.on('camera-controls:frame', onFrame)
+    return () => emitter.off('camera-controls:frame', onFrame)
+  }, [camera, wantPos, wantTgt, invalidate])
 
   useEffect(() => {
     camera.position.copy(home.position)

@@ -2,9 +2,9 @@ import { useLocale, usePascalI18n } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import {
   localizedLevelName,
+  frameViewerNode,
   selectViewerBuilding,
   selectViewerLevel,
-  selectViewerRoom,
   selectViewerUnit,
   Tooltip,
   TooltipContent,
@@ -139,11 +139,19 @@ export function ExplorePanel({
     [clearHover, source],
   )
 
+  // A room is only ever highlighted while hovered: a click frames it and selects nothing, so no
+  // room stays lit (and two rooms never look picked at once). Its floor is shown if it is another.
   const selectRoom = useCallback(
     (zoneId: string) => {
-      clearHover()
-      selectViewerRoom(zoneId, source)
-      if (compact) onMobileOpenChange(false)
+      const zone = source.nodes[zoneId as keyof typeof source.nodes] as { type?: string; parentId?: string | null } | undefined
+      const viewer = useViewer.getState()
+      const levelId = (zone?.type === 'zone' && zone.parentId ? zone.parentId : viewer.selection.levelId) as typeof viewer.selection.levelId
+      viewer.setSelection({ ...viewer.selection, levelId, zoneId: null, selectedIds: [] })
+      frameViewerNode(zoneId, source)
+      if (compact) {
+        clearHover()
+        onMobileOpenChange(false)
+      }
     },
     [clearHover, source, compact, onMobileOpenChange],
   )
@@ -195,7 +203,7 @@ export function ExplorePanel({
             <ul className="flex flex-col gap-0.5">
               {section.rows.map((row) => {
                 const isRoom = section.kind !== 'units'
-                const active = isRoom ? row.id === selection.zoneId : row.id === focusedUnitId
+                const active = !isRoom && row.id === focusedUnitId
                 const syncedHover = isRoom && row.id === hoveredId
                 return (
                   <li key={row.id}>

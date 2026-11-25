@@ -6,7 +6,8 @@ import { buildLevelPlan } from './planGeometry'
 
 /**
  * Interactive SVG mini floor plan drawn from the current level's real zone polygons.
- * Synced bidirectionally with the room list and 3D scene (`hoveredId` & `selection.zoneId`),
+ * Synced with the room list and 3D scene through `hoveredId`: a room is lit only while hovered,
+ * and a click frames it without selecting it,
  * and animates its room outlines drawing in when switching floors.
  */
 export function MiniPlan({
@@ -24,7 +25,6 @@ export function MiniPlan({
 }) {
   const i18n = usePascalI18n()
   const hoveredId = useViewer((s) => s.hoveredId)
-  const selectedZoneId = useViewer((s) => s.selection.zoneId)
   const glowId = useId().replaceAll(':', '')
 
   const plan = useMemo(
@@ -83,12 +83,11 @@ export function MiniPlan({
         </defs>
 
         {plan.rooms.map((room, index) => {
-          const isSelected = room.id === selectedZoneId
           const isHovered = room.id === hoveredId
-          const emphasised = isSelected || isHovered
+          const emphasised = isHovered
           return (
             <g
-              aria-label={`Select ${room.label}`}
+              aria-label={`Show ${room.label}`}
               className="cursor-pointer outline-none"
               key={room.id}
               onBlur={() => onLeaveRoom(room.id)}
@@ -105,12 +104,12 @@ export function MiniPlan({
               role="button"
               tabIndex={0}
             >
-              {/* Soft colour fill: subtle at rest, luminous when hovered or selected. */}
+              {/* Soft colour fill: subtle at rest, luminous while hovered. */}
               <path
                 className="transition-[fill-opacity] duration-200"
                 d={room.path}
                 fill={room.color}
-                fillOpacity={isSelected ? 0.44 : isHovered ? 0.34 : 0.14}
+                fillOpacity={isHovered ? 0.34 : 0.14}
                 fillRule="evenodd"
                 filter={emphasised ? `url(#glow-${glowId})` : undefined}
               />
