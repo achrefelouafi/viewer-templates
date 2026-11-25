@@ -13,10 +13,13 @@ and which rules to keep.
 
 | Path | Owns |
 | --- | --- |
-| `src/pascal/` | The API client: the contract schema (`contract.ts`), `getScene` / `fetchGlb` with typed errors and signed-URL renewal (`client.ts`), read helpers (`graph.ts`), and browser access resolution and PKCE (`access.ts`, `handoff.ts`). No React and no three.js in here; keep it that way so it can move into an SDK unchanged. |
+| `src/pascal/` | The API client: the contract schema (`contract.ts`), `getScene` / `fetchGlb` with typed errors and signed-URL renewal (`client.ts`), read helpers (`graph.ts`), browser access resolution and PKCE (`access.ts`, `handoff.ts`), and `saveSettings` / `parseSettings` for viewer settings (`settings.ts`). No React and no three.js in here; keep it that way so it can move into an SDK unchanged. |
+| `src/pascal-react/` | Viewer settings for React: `useViewerSettings`, the Customize panel `SettingsPanel` (with `settings-panel.css`) and its field blocks `SettingsSection`, `SettingsRow`, `SettingsOptions`. React only, no three.js, nothing template-specific. |
+| `src/settings.ts` | This template's viewer settings: the opening view's schema and defaults. |
 | `src/useListing.ts` | Loading flow: choose a ready bake or live graph; poll while baking. |
 | `src/App.tsx`, `src/styles.css` | Screens (loading, errors, access and Sign in with Pascal, no 3D file, WebGL unavailable) and the overlay UI. |
-| `src/viewer/Viewer.tsx` | The canvas: environment light, key light and shadow, camera framing, orbit controls. |
+| `src/viewer/Viewer.tsx` | The canvas: environment light, key light and shadow, camera framing (or the saved opening view), orbit controls. |
+| `src/viewer/OpeningCamera.tsx`, `openingView.ts` | Puts the camera on the saved opening view, and lets the Customize panel read the pose on screen. |
 | `src/viewer/LiveViewer.tsx` | Lazy live runtime: render plugin, read-only lease, graph/material hydration, readiness and listing interactions. |
 | `src/viewer/Model.tsx` | Parses the GLB, applies floor visibility, hover and click, plays door and window clips. |
 | `src/viewer/semantics.ts` | Maps GLB nodes to Pascal identities: floors, rooms, openables. |
@@ -181,6 +184,154 @@ rules:
 - Keep the copy neutral: Pascal does not reveal whether a project exists, is private or is
   linked to another viewer, and the screens must not imply it.
 
+## Viewer settings
+
+A project's managers customise how this viewer presents their project, from inside the viewer, and
+every later visitor gets it. This template's one setting is the opening view.
+
+- **Per project and viewer.** Saved by Pascal under (project, viewer), outside the scene graph and
+  any version; duplicating a project does not copy them. Pascal's own `/viewer/<id>` has none.
+- **Managers only, live on save.** Only someone who can manage the project saves, and a save is
+  what visitors get on their next read: there is no publish step. The unsaved draft lives in the
+  tab until Save or Discard.
+- **Public with the project.** Anyone who can read the project through this viewer reads its
+  settings. Never put a secret in them.
+- **At most 256 KB**, a JSON object, nested at most 32 levels. Version it (`v: 1`).
+- **Tolerate stale data.** Settings outlive the scene they were made on: ids of deleted rooms or
+  items, another build's shape. Parse with fallbacks and drop what no longer exists; never crash.
+
+**How a manager gets there.** Three ways, all ending with a configure credential (the read then
+says `settings.canConfigure: true`):
+
+- *From Pascal.* The Share popover's **Customize** (managers only, once the project is published
+  and bound to this viewer) opens the entry URL with `configure=1`. The helper authorizes with
+  `scope=configure` at once.
+- *On arrival.* When a signed-in manager opens this viewer from Pascal or follows their own share
+  link, the entry URL carries `configure=available` (any `access`). The hint grants nothing, so
+  `resolveAccess` asks Pascal for the configure credential at once, before the first read, in
+  place of the handoff the entry's `access` would start: session authorize with `scope=configure`
+  and `interaction=sign_in`. The manager arrives holding it, with a collapsed **Customize** tab
+  that opens the panel with no second trip. The viewer comes back to the address it arrived on,
+  same `access`, hint removed, so the address stays one any visitor can open.
+- *From the tab.* A manager who holds an ordinary session credential (they signed in here, or
+  opened an address without the hint) gets `settings.configureAvailable: true` on the read, which
+  shows the same collapsed tab. Pressing it calls `enterCustomize(projectId, baseUrl)`: the same
+  authorize, back to the same address with the panel open.
+
+If Pascal refuses either of the last two (a forged hint, a manager who lost access; Pascal may
+show its own refusal page first), the callback's `error=access_denied` returns the visitor to the
+exact address they left with the access they had (the transaction keeps it as `fallbackPath`; it
+must be this project and viewer and never itself `configure=1`), and `customizeRefused()` keeps
+the tab hidden, and the hint unused, for the rest of the browser tab. They never land on a refusal
+screen. An exchange that does not grant `"scope": "configure"` counts as the same refusal; from a
+`configure=1` link it asks to reopen, as before.
+
+`configure=1` survives only the round trip of Pascal's Customize link, and any other `configure`
+value is not a link Pascal makes (the page asks to reopen). A configure credential held in the tab
+is kept whatever a later entry says, and renews as one, in place. The panel starts open only from
+`configure=1` (`useViewerSettings().requested`); after that the tab remembers how it was left.
+Leaving Customize changes no credential: collapse the panel and, with no draft, the manager sees
+what visitors see. Everyone else makes the same requests as before and reads `settings` read-only.
+
+**The read and the write.** The scene read carries
+`settings: { viewerId, revision, data, canConfigure, configureAvailable? }`, or null when Pascal
+can't tell which viewer is reading (an older server omits it: same thing; an older server also
+omits `configureAvailable`, which then counts as false). Never saved is `revision: 0, data: null`.
+`saveSettings(baseUrl, projectId, { token, revision, data })` sends
+`PUT /api/projects/{id}/viewer-settings` with the configure credential and returns the new
+settings. It throws `ViewerSettingsError`: `conflict` (someone saved since `revision`; `current`
+holds theirs), `unauthorized` (the session ended or the manager lost access), `too_large`,
+`network`, and the rest.
+
+**In a template.** `useViewerSettings({ settings: scene.settings, token, baseUrl, projectId, parse,
+defaults })` gives `value` (the draft for a manager, the saved settings for everyone else),
+`saved`, `canConfigure` (in Customize mode now), `available` (show Customize: in it, or may enter
+it, and not refused in this tab), `enter()` (with `entering` and `enterError`), `dirty`,
+`set(updater)`, `save()`, `discard()`, `status` (`idle`, `saving`, `saved`, `conflict`, `expired`,
+`error`) and `reloadLatest()`. The draft survives a reload and the credential's renewal round trip
+(it is in `sessionStorage`, per issuer, viewer and project), saves against the revision it was
+started from, and the tab warns before closing with it unsaved.
+
+`<SettingsPanel settings={settings} description="…">` renders nothing unless `available`.
+Collapsed, it is a **Customize** pill on the right edge; before configure mode, pressing it calls
+`enter()`. In configure mode it toggles a panel on the right (a sheet across the bottom under
+560 px): a header saying what is customised (pass `description`, e.g. "How visitors first see
+<project> in this viewer."), your fields (`children`) in a scrolling body, and a footer with the
+save state (Unsaved changes, Saving…, Saved, a conflict with **Load the latest**, an ended session,
+errors), **Discard** and **Save**. Collapsing keeps the draft; the pill then shows a dot and reads
+"Customize, unsaved changes". Open or closed is remembered for the tab; arriving in configure mode
+for the first time opens it. Escape collapses it. Build fields from the blocks so every template's
+read alike: `SettingsSection` (a titled group), `SettingsRow` (a labelled field whose `value` says
+in words what Save stores, with its controls as children), `SettingsOptions` (a choice of one,
+radio-group semantics, arrow keys) and buttons with `className="pascal-settings-button"` (plus
+`pascal-settings-primary` for the main one). Theme it with the `--pascal-settings-*` properties
+listed in `src/pascal-react/settings-panel.css` (set in `styles.css` here, placed clear of the
+floor buttons), never with a backdrop blur over the canvas.
+
+This template stores `{ "v": 1, "opening": { "camera": { "position": [x, y, z], "target": [x, y, z] } } }`
+(`src/settings.ts`). The panel's **Opening view** section shows the camera as "Custom" or "Default
+(frames the house)"; **Use current view** copies the camera into the draft and **Clear** drops
+`opening`; the manager keeps navigating freely. The opening view is applied once, as the scene
+opens: visitors, and the manager on reload, open there. Without one, or with an invalid one, the
+camera frames the model as before.
+
+### Adding a setting
+
+A room tour, say: an ordered list of rooms, some hidden. Add it to the schema with its own
+fallback, next to `opening`, keeping the top level a `looseObject` so keys another build saved
+survive:
+
+```ts
+// src/settings.ts
+const TourStopSchema = z.object({ room: z.string(), hidden: z.optional(z.boolean()) })
+const ListingSettingsSchema = z.looseObject({
+  v: z.literal(1),
+  opening: /* as before */,
+  tour: z.catch(z.optional(z.array(TourStopSchema)), undefined),
+})
+```
+
+Read it against the graph, so rooms deleted since the tour was saved drop out (and go on the next
+save), and edit it through `settings.set` in a section of its own in the panel:
+
+```tsx
+// src/App.tsx, in Scene: `settings` is the useViewerSettings result the opening view uses.
+import { SettingsOptions, SettingsPanel, SettingsRow, SettingsSection } from './pascal-react'
+
+const rooms = useMemo(() => Object.values(scene.graph.nodes).filter((node) => node.type === 'zone'), [scene.graph])
+const roomIds = useMemo(() => new Set(rooms.map((room) => room.id)), [rooms])
+const tour = (settings.value.tour ?? []).filter((stop) => roomIds.has(stop.room))
+const editTour = (edit: (stops: typeof tour) => typeof tour) =>
+  settings.set((current) => ({ ...current, tour: edit((current.tour ?? []).filter((stop) => roomIds.has(stop.room))) }))
+
+<SettingsPanel settings={settings} description={`How visitors first see ${projectName(scene)} in this viewer.`}>
+  <SettingsSection title="Opening view">{/* …the camera row… */}</SettingsSection>
+  <SettingsSection title="Room tour" description="The rooms visitors step through, in order.">
+    {rooms.map((room) => {
+      const stop = tour.find((each) => each.room === room.id)
+      const state = !stop ? 'off' : stop.hidden ? 'hidden' : 'shown'
+      return (
+        <SettingsRow key={room.id} label={room.name ?? 'Room'}
+          value={stop ? `Stop ${tour.indexOf(stop) + 1}${stop.hidden ? ', hidden' : ''}` : 'Not in the tour'}>
+          <SettingsOptions label={`${room.name ?? 'Room'} in the tour`} value={state}
+            options={[{ value: 'off', label: 'Off' }, { value: 'shown', label: 'Shown' }, { value: 'hidden', label: 'Hidden' }]}
+            onChange={(next) => editTour((stops) => next === 'off'
+              ? stops.filter((each) => each.room !== room.id)
+              : stop
+                ? stops.map((each) => (each.room === room.id ? { ...each, hidden: next === 'hidden' } : each))
+                : [...stops, { room: room.id, hidden: next === 'hidden' }])} />
+        </SettingsRow>
+      )
+    })}
+  </SettingsSection>
+</SettingsPanel>
+```
+
+Visitors then walk `tour.filter((stop) => !stop.hidden)` in order. Give every field a row whose
+`value` says what is set, so the manager always reads what Save stores; when a choice is something
+a visitor sees, show it on screen as it is chosen. Never save on every change: the manager presses
+Save. The panel is 320 px wide (a sheet on phones), so a long list scrolls inside it.
+
 ## Private projects with your own login
 
 The read works without a credential for public projects. For a private project, your
@@ -255,7 +406,8 @@ Cloudflare Pages).
 - Keep the template installable from this folder using published npm dependencies. Import the
   Pascal runtime only inside the lazy live path, and use `@pascal-app/nodes/render`, not the
   editor entry.
-- Keep `src/pascal/` free of React and three.js.
+- Keep `src/pascal/` free of React and three.js, and `src/pascal-react/` free of three.js and
+  of anything template-specific. CI checks both are identical across the templates that have them.
 - Keep the CSP in `vite.config.ts` in step with what the page loads. The decoders need
   `'wasm-unsafe-eval'`, `'unsafe-eval'` (the Basis transcoder's Emscripten bindings build functions
   at runtime inside its worker) and `worker-src blob:`; the reasons are in the file. KTX2 textures

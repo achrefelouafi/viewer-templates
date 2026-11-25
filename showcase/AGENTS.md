@@ -22,7 +22,8 @@ the loading flow and the runtime, which this template shares.
 | `src/showcase/CutSlider.tsx`, `IntroSlot.tsx`, `useIntro.ts` | The Cut view controls; the intro's Skip button and its once-per-page sequencing. |
 | `src/showcase/families.ts`, `touch.ts` | X-ray family labels and the opening family; whether the visitor walks by touch (from real input). |
 | `src/showcase/modes.ts`, `intro.ts`, `framing.ts`, `front.ts`, `coalesce.ts` | Pure, unit-tested: modes and moods over the store, cut slider maths, the intro's clock-driven sequence and camera orbit, the house's front and the arrival heading, the once-per-frame scrub writer. |
-| `src/showcase/presentation.ts` | Holds the loader until the first view is staged and drawn; the instant camera placement the arrival and the intro use behind it. |
+| `src/showcase/presentation.ts` | Holds the loader until the first view is staged and drawn; the instant camera placement the arrival and the intro use behind it, and the orbit camera's pose (`cameraPose`). |
+| `src/showcase/opening.ts` | Pure, unit-tested: viewer settings (the opening view's schema, per-field fallbacks) and `resolveOpening` over the default view. |
 | `src/showcase/viewer-actions.ts` | Every store call the chrome makes (`setLevelMode`, `setTimeOfDay`, walkthrough, framing). |
 | `src/showcase/WalkHud.tsx` | The walkthrough HUD and its numbers (speeds, see distance) and copy, `/next`'s; the action, Shutters, Close and Jump buttons. |
 | `src/showcase/sounds.ts` | `/next`'s interface sounds on the package cues: a hover tick per control entered and per room reached, a click per press and per callout pinned, a soft fall on dismiss; muted with the sound toggle, rate-limited by `playSound`, silent before the first gesture. |
@@ -33,6 +34,7 @@ the loading flow and the runtime, which this template shares.
 | `src/viewer/ProjectViewer.tsx` | The assembly, as in `pascal`, with `ShowcaseOverlay` in place of the header and controls bar. |
 | `src/viewer/screens.tsx` | Loading, access, Sign in with Pascal and error screens in the loader's look. |
 | `src/main.tsx`, `config.ts`, `App.tsx`, `useProjectScene.ts`, `src/runtime/`, `src/pascal/` | As in `pascal`. |
+| `src/pascal-react/` | `useViewerSettings`, `SettingsPanel` and its field blocks, byte-identical to `listing/src/pascal-react/`. |
 | `public/` | Sounds (`audios/sfx/`) and DM Sans with its licence (`fonts/`). |
 | `tests/` | Playwright tests against a mocked API; `tests/unit/` runs without a browser. |
 
@@ -166,6 +168,48 @@ the scene store.
   with the section off and the default view.
 - Reset view applies the opening view and the settled framing (`frameSettled`).
 - Sound toggles `useAudioSettings().muted`; the viewer's own sounds play, from `public/audios/sfx`.
+
+## Viewer settings
+
+The model, how a manager enters Customize mode (from Pascal or from the viewer's own Customize
+tab), the hook, the panel and its field blocks, and how to add a setting are
+in [listing's AGENTS.md](../listing/AGENTS.md#viewer-settings). This template's one setting is the
+opening view, the state the page settles into after its intro:
+
+```json
+{ "v": 1, "opening": { "camera": { "position": [x, y, z], "target": [x, y, z] }, "time": "dusk", "mode": "exploded" } }
+```
+
+- `time` is a mood (`night`, `dawn`, `day`, `dusk`), `mode` one of `exterior`, `exploded`, `cut`,
+  `xray`. Walkthrough is never saved: nobody arrives walking. Each field falls back on its own
+  (`opening.ts`): no camera frames the house as before, no time is Dusk, an unknown mode or one
+  this page does not offer (`availableModes`) is the default one.
+- `ProjectViewer` resolves the saved view (a manager's draft) once, as the scene opens, into an
+  `OpeningView` (`resolveOpening`), and hands it to `applyOpeningView` (mood and mode before the
+  first frame; the Cut view and X-ray wait for the model's bounds, `settleOpeningMode`) and to the
+  chrome. The intro's orbit ends on the saved camera's heading, and `finishIntro` applies the mode,
+  mood and camera; without the intro the camera is placed at once behind the loader. Reset view
+  returns to the opening view as it stands (a manager's draft included).
+- A camera in the link (`?camera=`) still wins over the saved camera; the saved time and mode
+  apply with it.
+- The Customize panel's **Opening view** section (`OpeningSettings.tsx`) shows each field as it
+  will be saved: **Camera** ("Custom" or "Default (frames the house)", with **Use current** and
+  **Clear**), **Time of day** (Default, Night, Dawn, Day, Dusk) and **Mode** (Default and the modes
+  this page offers). Choosing a time glides the sky there and choosing a mode switches to it, so
+  the screen shows what is chosen. **Use current view** sets all three from the screen: the orbit
+  camera (`cameraPose`), the mood the sky is on or gliding to, and the mode (`modeOf`); it is
+  disabled while walking, when the orbit controls are unmounted. `withOpening` (`opening.ts`)
+  changes one field; a field back on Default is dropped, and an opening view with none left is
+  removed. The Cut view's plane and X-ray's family are not saved: they open where they always do.
+- The dial and the phone bar change the screen, never the draft: what Save stores is what the
+  panel shows. When the screen's time or mode differs from it, the panel says so ("On screen now:
+  Day…"). This was the first build's trap: a time changed on the dial after (or without) setting
+  the view was not saved, though the sky showed it.
+- The dial only rests on the four moods (a glide in flight counts as its target), so `time` stays
+  a mood; there is no free minute to save.
+- Collapsed, the Customize pill sits on the right edge under the sound and full screen buttons;
+  open, the panel sits beside them so they stay in reach; on phones it is a sheet across the
+  bottom. Colours follow the chrome, without a blur over the canvas (`showcase.css`).
 
 ## Discovery
 

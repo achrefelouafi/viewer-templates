@@ -11,7 +11,10 @@ import {
 import { PASCAL_BASE_URL, PASCAL_TOKEN_URL, projectIdFromLocation } from './config'
 import { hasHandoffCallback } from './pascal/handoff'
 import { canSignIn, signIn, SignInUnavailable, listLevels, type PascalError, type SceneResponse } from './pascal'
+import { SettingsPanel, SettingsRow, SettingsSection, useViewerSettings } from './pascal-react'
+import { DEFAULT_SETTINGS, parseListingSettings, roundPose } from './settings'
 import { type ListingState, useListing } from './useListing'
+import { currentView } from './viewer/openingView'
 import type { ModelInfo } from './viewer/Model'
 import type { RoomHover } from './viewer/semantics'
 import { hasWebGL2 } from './viewer/webgl'
@@ -79,6 +82,12 @@ function Scene({
     console.error(error)
     setOpenError(true)
   }, [])
+  const settings = useViewerSettings({
+    settings: scene.settings, token: state.token, baseUrl: PASCAL_BASE_URL, projectId: scene.project.id,
+    parse: parseListingSettings, defaults: DEFAULT_SETTINGS,
+  })
+  // The opening view applies as the scene opens; a manager's later changes don't move the camera.
+  const [opening] = useState(() => settings.value.opening?.camera)
 
   if (openError) {
     return (
@@ -115,6 +124,7 @@ function Scene({
               <LiveViewer
                 scene={scene}
                 levelId={levelId}
+                opening={opening}
                 onError={handleError}
                 onHover={setHover}
                 onSceneReadyChange={setLiveReady}
@@ -128,6 +138,7 @@ function Scene({
                 onError={handleError}
                 onHover={setHover}
                 onReady={setModel}
+                opening={opening}
               />
             ) : null}
           </Suspense>
@@ -170,6 +181,26 @@ function Scene({
       ) : null}
 
       {ready && hasOpenables ? <p className="hint">Click a door or window to open it</p> : null}
+
+      {ready ? (
+        <SettingsPanel description={`How visitors first see ${projectName(scene)} in this viewer.`} settings={settings}>
+          <SettingsSection title="Opening view">
+            <SettingsRow label="Camera" value={settings.value.opening?.camera ? 'Custom' : 'Default (frames the house)'}>
+              <button className="pascal-settings-button pascal-settings-primary" type="button" onClick={() => {
+                const view = currentView()
+                if (view) settings.set((current) => ({ ...current, opening: { camera: roundPose(view) } }))
+              }}>
+                Use current view
+              </button>
+              <button aria-label="Clear opening camera" className="pascal-settings-button" disabled={!settings.value.opening}
+                onClick={() => settings.set(({ opening: _, ...rest }) => rest)} type="button">
+                Clear
+              </button>
+            </SettingsRow>
+            <p className="pascal-settings-hint">Visitors open on this view, then move freely.</p>
+          </SettingsSection>
+        </SettingsPanel>
+      ) : null}
 
       {hover ? (
         <div className="room-label" style={{ left: hover.x + 14, top: hover.y + 14 }}>

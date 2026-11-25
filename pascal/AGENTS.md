@@ -24,7 +24,7 @@ read it before changing how projects are read.
 | `src/runtime/bootstrap.ts` | `prepareSceneRuntime`: built-in nodes, viewer config (assets, sounds, icons, local decoders), read-only lease, library materials, artifact store, plugins. |
 | `src/runtime/plugins.ts` | The plugin allowlist, install-state rules and the unknown-kind warning. |
 | `src/runtime/plugin-loader.ts` | Loads plugins once each, with a deadline and a late-arrival callback. |
-| `src/runtime/materials.ts`, `artifacts.ts` | Library material registration; the read-only artifact store (private reads prefetch into blob URLs). |
+| `src/runtime/materials.ts`, `artifacts.ts` | Library material registration; the read-only artifact store (private reads prefetch into blob URLs, waiting out a `429` for the `Retry-After` Pascal gives). |
 | `src/runtime/project-scene.ts` | Connects `useProjectScene` to `prepareSceneRuntime`. |
 | `src/runtime/trees-render.d.ts` | Type-only stand-in for the trees render entry (mapped in `tsconfig.json` `paths`). |
 | `src/pascal/` | The API client and Open from Pascal helpers, shared with `listing`. No React, no three.js. |
@@ -97,6 +97,14 @@ Pascal" or "Reopen your share link" screen; it never falls back to an anonymous 
 `prepareSceneRuntime` waits up to 20 seconds for the plugins the scene needs. A plugin that
 arrives later bumps `runtimeRevision`: the live graph is set again and the bake's replacement
 nodes are rebuilt. Kinds no registered plugin draws are counted and warned once per kind.
+
+## Viewer settings
+
+`src/pascal/` carries viewer settings like every template (Customize mode, `scope=configure`, the
+`configure=available` hint that gets a manager the pass on arrival, `enterCustomize`, `saveSettings`; see [listing's AGENTS.md](../listing/AGENTS.md#viewer-settings)), but this template
+uses none yet: it ignores the read's `settings` and has no `src/pascal-react/`. To add the opening
+view, copy `src/pascal-react/` from `listing` (and its `diff -r` line in CI) and follow
+[`showcase`](../showcase/AGENTS.md#viewer-settings), whose assembly this one shares.
 
 ## Sign in with Pascal
 

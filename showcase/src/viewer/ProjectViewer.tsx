@@ -25,22 +25,26 @@ import {
 import { CameraControlsImpl } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Object3D } from 'three'
-import { viewerFlagsFromLocation } from '../config'
+import { type Object3D, Vector3 } from 'three'
+import { PASCAL_BASE_URL, viewerFlagsFromLocation } from '../config'
 import type { SceneResponse } from '../pascal'
 import { listLevels } from '../pascal/graph'
+import { SettingsPanel, useViewerSettings } from '../pascal-react'
 import { pluginInstallStateOf, publishedSceneSetup } from '../runtime/plugins'
 import { DiscoveryScene, renderCallout, reportBakedPick } from '../showcase/discovery/DiscoveryScene'
 import { interactiveIds as findInteractive } from '../showcase/discovery/interactive'
 import { Loader } from '../showcase/Loader'
-import { frameRendered, registerPlacement, resetPresentation, usePresented } from '../showcase/presentation'
+import { availableModes } from '../showcase/modes'
+import { DEFAULT_SETTINGS, parseShowcaseSettings, resolveOpening } from '../showcase/opening'
+import { OpeningSettings } from '../showcase/OpeningSettings'
+import { frameRendered, registerPlacement, registerPoseReader, resetPresentation, usePresented } from '../showcase/presentation'
 import { ShowcaseOverlay } from '../showcase/ShowcaseOverlay'
 import { features } from '../features'
 import { ShowcaseCamera } from '../showcase/ShowcaseCamera'
 import { SEE_DISTANCE, WALK_SPEEDS } from '../showcase/WalkHud'
 import { introAhead } from '../showcase/useIntro'
 import { followSiteLocation } from '../showcase/time'
-import { applyOpeningView, modelBounds, shareDaylightSite } from '../showcase/viewer-actions'
+import { applyOpeningView, modelBounds, type SceneContext, shareDaylightSite } from '../showcase/viewer-actions'
 import { ErrorBoundary } from './ErrorBoundary'
 
 /**
@@ -71,7 +75,14 @@ function PresentationBridge() {
   const controls = useThree((state) => state.controls) as CameraControlsImpl | null
   useEffect(() => {
     registerPlacement(controls ? (position, target) => { void controls.setLookAt(...position, ...target, false) } : null)
-    return () => registerPlacement(null)
+    registerPoseReader(controls ? () => ({
+      position: controls.getPosition(new Vector3()).toArray(),
+      target: controls.getTarget(new Vector3()).toArray(),
+    }) : null)
+    return () => {
+      registerPlacement(null)
+      registerPoseReader(null)
+    }
   }, [controls])
   // The viewer draws at priority 1; count completed draws, not the frame's pre-render tick.
   useFrame(() => frameRendered(), 2)
@@ -109,12 +120,14 @@ function GlbReadySignal({ onReady }: { onReady: () => void }) {
   return null
 }
 
-export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
+export function ProjectViewer({ scene, glbUrl, runtimeRevision, token }: {
   scene: SceneResponse
   /** Blob URL of the downloaded bake, or null to rebuild the graph live. */
   glbUrl: string | null
   /** Bumped when a plugin arrives after the loading deadline: rebuild what it draws. */
   runtimeRevision: number
+  /** The credential the scene was read with: a configure one saves viewer settings. */
+  token?: string
 }) {
   const flags = useMemo(() => viewerFlagsFromLocation(), [])
   const { project, revision } = scene
@@ -153,6 +166,19 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
     const parsed = parseOpeningCamera(flags.camera)
     return parsed === 'saved' ? savedSceneCamera(floorplanScene.nodes) : parsed
   }, [flags.camera, floorplanScene])
+  // Viewer settings: the saved opening view, a manager's draft in Customize mode. A camera in the
+  // link (`?camera=`) still wins over the saved one; its mode and time apply either way.
+  const settings = useViewerSettings({
+    settings: scene.settings, token, baseUrl: PASCAL_BASE_URL, projectId: project.id,
+    parse: parseShowcaseSettings, defaults: DEFAULT_SETTINGS,
+  })
+  const offeredModes = useMemo(() => availableModes(features, {
+    coarsePointer: matchMedia('(pointer: coarse)').matches, familyCount: families.length,
+  }).map((mode) => mode.id), [families])
+  const opening = useMemo(() => resolveOpening(settings.value.opening, levelCount, offeredModes),
+    [settings.value.opening, levelCount, offeredModes])
+  // The page opens on the view it was read with; a manager's later changes apply on Reset view.
+  const [arrival] = useState(() => opening)
   const [openingCameraApplied, setOpeningCameraApplied] = useState(false)
   const markOpeningCameraApplied = useCallback(() => setOpeningCameraApplied(true), [])
   const walkingOnFoot = useViewer((s) => s.walkthroughMode && s.walkthroughMovement === 'walk')
@@ -179,9 +205,9 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
     viewer.setShowZones(false)
     // Open on the /next view: exploded floors at dusk (one floor stays together, see `defaultView`),
     // or the whole house when the intro is about to reveal it.
-    applyOpeningView(levelCount, { introAhead: introAhead(features.intro && !flags.camera) })
+    applyOpeningView(levelCount, { introAhead: introAhead(features.intro && !flags.camera), opening: arrival })
     return () => useViewer.getState().setProjectId(null)
-  }, [project.id, projectName, levelCount, flags.camera])
+  }, [project.id, projectName, levelCount, flags.camera, arrival])
 
   // A bake never loads its graph into the scene store: give the sun the site's north and location.
   useEffect(() => (glbUrl ? shareDaylightSite(floorplanScene.nodes) : undefined), [glbUrl, floorplanScene])
@@ -215,6 +241,10 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
       : { nodes: sceneNodes, objectFor: (id) => sceneRegistry.nodes.get(id) },
     [glbUrl, floorplanScene, glbObjects, sceneNodes],
   )
+  // What the Customize panel's mode choice reads (the Cut view and X-ray measure the model).
+  const sceneContextRef = useRef<SceneContext>({ nodes: floorplanScene.nodes, source: viewerSource, families })
+  sceneContextRef.current = { nodes: floorplanScene.nodes, source: viewerSource, bakedObjects: glbUrl ? glbObjects : undefined, families }
+  const sceneContext = useCallback(() => sceneContextRef.current, [])
   // Doors, windows and items with controls: a click on one pins its callout.
   const interactiveIds = useMemo(() => findInteractive(graph), [graph])
   // The orbit's far limit grows with the model, once its bounds are known.
@@ -269,8 +299,14 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
               introAllowed={!flags.camera}
               levelCount={levelCount}
               nodes={floorplanScene.nodes}
+              opening={opening}
               source={viewerSource}
             />
+          )}
+          {!showSceneLoader && (
+            <SettingsPanel description={`How visitors first see ${projectName?.trim() || 'this project'} in this viewer.`} settings={settings}>
+              <OpeningSettings context={sceneContext} levelCount={levelCount} offeredModes={offeredModes} settings={settings} />
+            </SettingsPanel>
           )}
 
           <ViewerStage
