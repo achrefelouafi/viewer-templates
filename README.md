@@ -8,6 +8,7 @@ Starting points for building your own viewer of [Pascal](https://editor.pascal.a
 | [`pascal`](pascal) | Pascal's hosted viewer: header, controls bar, 3D and 2D views, rooms, walkthrough and sounds | Baked 3D file with live parts, or a live rebuild |
 | [`showcase`](showcase) | A project page with the look of Pascal's `/next` demo: a radial dial for views and time of day, a reveal intro, room and item discovery, a phone bottom bar | Same as `pascal` |
 | [`minimal`](minimal) | A monochrome line drawing with no materials, turned between four axonometric corners and a plan | Baked 3D file, or a live rebuild |
+| [`immersive`](immersive) | The hosted viewer taken further: a tour mode, a walkthrough with VR on headsets, a measure tool in 3D and on the plan, and AR on phones (Quick Look on iPhone, WebXR on Android) with no backend | Same as `pascal` |
 
 Every template reads Pascal's public read, `GET https://editor.pascal.app/api/projects/{id}/scene`. It answers a project's published revision with the scene graph, its materials and short-lived links to the baked 3D file. Public projects need no key.
 
@@ -21,7 +22,7 @@ npm run dev
 # open http://localhost:5173/?project=<published project id>
 ```
 
-Replace `listing` with `pascal` to start from the hosted viewer, with `showcase` for the `/next` look, or with `minimal` for the line drawing.
+Replace `listing` with `pascal` to start from the hosted viewer, with `showcase` for the `/next` look, with `minimal` for the line drawing, or with `immersive` for the tour, VR and AR viewer.
 
 Or deploy a copy straight away:
 
