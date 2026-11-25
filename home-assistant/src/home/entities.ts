@@ -201,17 +201,31 @@ export function kelvinColor(k: number) {
 export const HVAC_COLOR: Record<string, string> = {
   cool: '#63cfff', heat: '#ff9548', fan_only: '#dfe7ef', dry: '#b9a7ff', heat_cool: '#9fe8c8', auto: '#9fe8c8', off: '#2a2f35',
 }
-/** What the unit is doing right now: heat_cool and auto cool or heat towards the target. */
+/** The target as words: one temperature, or the low–high band heat_cool keeps between. */
+export function climateTarget(e: HassEntity): string | null {
+  const a = e.attributes
+  if (a.temperature != null) return `${a.temperature}°`
+  if (a.target_temp_low != null && a.target_temp_high != null) return `${a.target_temp_low}–${a.target_temp_high}°`
+  return null
+}
+
+/** What the unit is doing right now: as Home Assistant reports it, or else heat_cool and auto cool
+    or heat towards the target (or out of the low–high band). */
 export function hvacAction(e: HassEntity): 'cooling' | 'heating' | 'fan' | 'drying' | 'idle' | 'off' {
-  const target = Number(e.attributes.temperature ?? 21)
-  const now = Number(e.attributes.current_temperature ?? target)
+  const reported = ({ cooling: 'cooling', heating: 'heating', fan: 'fan', drying: 'drying', idle: 'idle', off: 'off' } as const)[String(e.attributes.hvac_action) as 'cooling']
+  if (reported && e.state !== 'off') return reported
+  const a = e.attributes
+  const low = Number(a.temperature ?? a.target_temp_low ?? 21)
+  const high = Number(a.temperature ?? a.target_temp_high ?? low)
+  const target = low
+  const now = Number(a.current_temperature ?? target)
   switch (e.state) {
     case 'off': return 'off'
-    case 'cool': return now > target + 0.2 ? 'cooling' : 'idle'
+    case 'cool': return now > high + 0.2 ? 'cooling' : 'idle'
     case 'heat': return now < target - 0.2 ? 'heating' : 'idle'
     case 'fan_only': return 'fan'
     case 'dry': return 'drying'
-    default: return now > target + 0.2 ? 'cooling' : now < target - 0.2 ? 'heating' : 'idle'
+    default: return now > high + 0.2 ? 'cooling' : now < low - 0.2 ? 'heating' : 'idle'
   }
 }
 /** The air's tint: by what it is doing, so heat_cool reads as cool air or warm air. */
@@ -297,7 +311,13 @@ export const addDb = (levels: number[]) => 10 * Math.log10(levels.reduce((s, l) 
 
 export const nameOf = (e: HassEntity) => e.attributes.friendly_name ?? e.entity_id
 
-export function statusOf(e: HassEntity): string {
+export type ClimateStatusFormatters = {
+  formatEntityState: (e: HassEntity, state?: string) => string
+  formatEntityAttributeValue: (e: HassEntity, attribute: string, value?: unknown) => string
+  formatNumber: (num: string | number) => string
+}
+
+export function statusOf(e: HassEntity, fmt?: ClimateStatusFormatters): string {
   switch (domainOf(e.entity_id)) {
     case 'light': {
       if (!isOn(e)) return 'Off'
@@ -307,10 +327,30 @@ export function statusOf(e: HassEntity): string {
       return e.attributes.color_mode && e.attributes.color_mode !== 'brightness' && e.attributes.color_mode !== 'onoff' ? `${pct}% · colour` : `${pct}%`
     }
     case 'climate': {
+      if (fmt) {
+        if (e.state === 'off' || e.state === 'unavailable' || e.state === 'unknown') {
+          return fmt.formatEntityState(e)
+        }
+        const rawAction = typeof e.attributes.hvac_action === 'string' ? e.attributes.hvac_action : undefined
+        const label =
+          rawAction && rawAction !== 'off'
+            ? fmt.formatEntityAttributeValue(e, 'hvac_action')
+            : fmt.formatEntityState(e)
+        let target: string | null = null
+        if (e.attributes.temperature != null) {
+          target = fmt.formatEntityAttributeValue(e, 'temperature')
+        } else if (e.attributes.target_temp_low != null && e.attributes.target_temp_high != null) {
+          target = `${fmt.formatNumber(Number(e.attributes.target_temp_low))}–${fmt.formatEntityAttributeValue(e, 'target_temp_high')}`
+        }
+        return target ? `${label} · ${target}` : label
+      }
       if (e.state === 'off') return 'Off'
       const a = hvacAction(e)
-      const t = e.attributes.temperature
-      return a === 'cooling' ? `Cooling to ${t}°` : a === 'heating' ? `Heating to ${t}°` : a === 'drying' ? 'Drying' : a === 'fan' ? 'Fan only' : `Holding ${t}°`
+      const t = climateTarget(e)
+      if (a === 'drying') return 'Drying'
+      if (a === 'fan') return 'Fan only'
+      if (!t) return a === 'cooling' ? 'Cooling' : a === 'heating' ? 'Heating' : 'Idle'
+      return a === 'cooling' ? `Cooling · ${t}` : a === 'heating' ? `Heating · ${t}` : `${cap(e.state)} · ${t}`
     }
     case 'fan': return isOn(e) ? `${e.attributes.percentage}%${e.attributes.oscillating ? ' · oscillating' : ''}` : 'Off'
     case 'sensor': {

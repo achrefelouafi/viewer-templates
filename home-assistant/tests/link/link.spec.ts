@@ -43,6 +43,22 @@ test('the lab home links every device to its thing, and nothing to a wrong one',
   expect(off).toEqual([])
 })
 
+test('a device in no area is never placed by itself, and a climate unit never takes a fan', () => {
+  const { nodes, areaName } = labPlan()
+  const { things, rooms } = readThings(nodes)
+  const lab = entityInfos(LAB_ENTITIES, areaName)
+  // the lab's own AC with no area, and a second climate unit in a room that has no AC left
+  const loose = lab.map((e) => (e.entity_id === 'climate.lounge_ac' ? { entity_id: e.entity_id, name: e.name } : e))
+  const report = linkHome(things, [...loose, { entity_id: 'climate.thermostat', name: 'Thermostat' }], rooms)
+  const ac = report.links.find((l) => l.entityId === 'climate.lounge_ac')!
+  expect(ac.thingId).toBeUndefined()
+  expect(ac.status).toBe('unplaced')
+  const other = report.links.find((l) => l.entityId === 'climate.thermostat')!
+  const kindOf = (id?: string) => things.find((t) => t.id === id)?.kind
+  expect(other.thingId).toBeUndefined()
+  expect(other.candidates.map((c) => kindOf(c.thingId))).not.toContain('fan')
+})
+
 test('names read as device kinds, and furniture does not', () => {
   const kind = (name: string, attachTo?: 'ceiling' | 'wall') => classify({ type: 'item', asset: { name, ...(attachTo ? { attachTo } : {}) } })?.kind ?? null
   expect(kind('Fan', 'ceiling')).toBe('ceiling-fan')

@@ -214,8 +214,23 @@ export const LAB_ENTITIES: HassEntities = Object.fromEntries(
     {
       entity_id: 'climate.lounge_ac', state: 'cool',
       attributes: {
-        friendly_name: 'Lounge air conditioner', hvac_modes: ['off', 'cool', 'heat', 'heat_cool', 'dry', 'fan_only'], fan_modes: ['auto', 'low', 'medium', 'high'],
-        fan_mode: 'auto', min_temp: 16, max_temp: 30, target_temp_step: 1, temperature: 21, current_temperature: 25.4, current_humidity: 61,
+        friendly_name: 'Lounge air conditioner',
+        supported_features: 959, // TARGET_TEMPERATURE | TARGET_TEMPERATURE_RANGE | TARGET_HUMIDITY | FAN_MODE | PRESET_MODE | SWING_MODE | TURN_OFF | TURN_ON | SWING_HORIZONTAL_MODE
+        hvac_modes: ['off', 'cool', 'heat', 'heat_cool', 'dry', 'fan_only'],
+        hvac_action: 'cooling',
+        fan_modes: ['auto', 'low', 'medium', 'high'],
+        fan_mode: 'auto',
+        preset_modes: ['none', 'eco', 'comfort', 'boost', 'sleep'],
+        preset_mode: 'none',
+        swing_modes: ['off', 'vertical', 'horizontal', 'both'],
+        swing_mode: 'off',
+        swing_horizontal_modes: ['off', 'on'],
+        swing_horizontal_mode: 'off',
+        min_temp: 16, max_temp: 30, target_temp_step: 0.5,
+        temperature: 21, target_temp_low: null, target_temp_high: null,
+        current_temperature: 25.4,
+        min_humidity: 30, max_humidity: 80, target_humidity_step: 5,
+        humidity: 50, current_humidity: 61,
       },
     },
     {

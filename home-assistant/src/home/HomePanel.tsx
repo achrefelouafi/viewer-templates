@@ -13,7 +13,6 @@ import {
   FIELDS,
   fieldColor,
   fieldOf,
-  HVAC_COLOR,
   isOn,
   kelvinColor,
   lightColor,
@@ -26,13 +25,16 @@ import {
   type HomeDevice,
   type ServiceCall,
 } from './entities'
+import { ClimateEntityFeature, supportsFeature } from './controls/climate'
+import { MoreInfoClimate } from './controls/MoreInfoClimate'
+import { type EntityFormatters, useEntityFormatters } from './hass/names'
 import type { PinRefs } from './HomeEffects'
 
 /* The Home panel: pins riding on the model, the device list by room, the selected device's card with
    Home Assistant's own controls for its domain, and the floor-field picker. Every control is a
    Home Assistant service call, shown at the foot of the card. */
 
-type Call = (domain: string, service: string, data: ServiceCall['data']) => void
+type Call = (domain: string, service: string, data: ServiceCall['data']) => Promise<boolean> | void
 
 const Svg = ({ children, className = 'size-4' }: { children: ReactNode; className?: string }) => (
   <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -144,7 +146,16 @@ function accent(e: HassEntity) {
     }
   }
 }
-const toggles = (e: HassEntity) => TOGGLE_DOMAINS.includes(domainOf(e.entity_id))
+const toggles = (e: HassEntity) => {
+  const d = domainOf(e.entity_id)
+  if (d === 'climate') {
+    return (
+      supportsFeature(e, ClimateEntityFeature.TURN_ON) ||
+      supportsFeature(e, ClimateEntityFeature.TURN_OFF)
+    )
+  }
+  return TOGGLE_DOMAINS.includes(d)
+}
 /** Whether the pin and icon show the device's colour: on, open, working, or (sensors) always. */
 function lit(e: HassEntity) {
   switch (domainOf(e.entity_id)) {
@@ -357,10 +368,9 @@ function simulateLabel(dc: string, on: boolean) {
   }
 }
 
-const HVAC_LABEL: Record<string, string> = { off: 'Off', cool: 'Cool', heat: 'Heat', heat_cool: 'Auto', auto: 'Auto', dry: 'Dry', fan_only: 'Fan' }
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
-function Controls({ e, call, history, layer, onLayer, areas }: { e: HassEntity; call: Call; history: number[]; layer: FieldKind | null; onLayer: (k: FieldKind | null) => void; areas: Area[] }) {
+function Controls({ e, call, formatters, history, layer, onLayer, areas }: { e: HassEntity; call: Call; formatters: EntityFormatters; history: number[]; layer: FieldKind | null; onLayer: (k: FieldKind | null) => void; areas: Area[] }) {
   const id = e.entity_id
   const a = e.attributes
   switch (domainOf(id)) {
@@ -392,31 +402,8 @@ function Controls({ e, call, history, layer, onLayer, areas }: { e: HassEntity; 
         </>
       )
     }
-    case 'climate': {
-      const target = Number(a.temperature ?? 21)
-      const min = Number(a.min_temp ?? 16)
-      const max = Number(a.max_temp ?? 30)
-      return (
-        <>
-          <div className="flex items-center justify-between gap-3">
-            <button type="button" aria-label="Lower the target" disabled={e.state === 'off' || target <= min} onClick={() => call('climate', 'set_temperature', { entity_id: id, temperature: target - 1 })}
-              className="grid size-10 place-items-center rounded-full bg-foreground/5 text-lg disabled:opacity-40">−</button>
-            <div className="grid text-center" aria-live="polite">
-              <b className="font-mono font-semibold text-4xl">{e.state === 'off' ? 'Off' : `${target}°`}</b>
-              <span className="text-muted-foreground text-xs">Room {Number(a.current_temperature ?? 0).toFixed(1)}° · {a.current_humidity as number}%</span>
-            </div>
-            <button type="button" aria-label="Raise the target" disabled={e.state === 'off' || target >= max} onClick={() => call('climate', 'set_temperature', { entity_id: id, temperature: target + 1 })}
-              className="grid size-10 place-items-center rounded-full bg-foreground/5 text-lg disabled:opacity-40">+</button>
-          </div>
-          <Seg<string> label="Mode" value={e.state} onPick={(m) => call('climate', 'set_hvac_mode', { entity_id: id, hvac_mode: m })}
-            options={((a.hvac_modes as string[]) ?? []).filter((m) => m !== 'off').map((m) => ({ v: m, t: HVAC_LABEL[m] ?? m, c: HVAC_COLOR[m] }))} />
-          {Array.isArray(a.fan_modes) && (
-            <Seg<string> label="Fan" value={String(a.fan_mode)} onPick={(m) => call('climate', 'set_fan_mode', { entity_id: id, fan_mode: m })}
-              options={(a.fan_modes as string[]).map((m) => ({ v: m, t: cap(m) }))} />
-          )}
-        </>
-      )
-    }
+    case 'climate':
+      return <MoreInfoClimate entity={e} call={call} formatters={formatters} />
     case 'fan': {
       const pct = Number(a.percentage ?? 0)
       return (
@@ -911,7 +898,12 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
     return () => window.removeEventListener('keydown', onKey)
   }, [onSelect])
 
-  const toggle = (e: HassEntity) => call(domainOf(e.entity_id), 'toggle', { entity_id: e.entity_id })
+  const formatters = useEntityFormatters()
+  const toggle = (e: HassEntity) => {
+    const d = domainOf(e.entity_id)
+    if (d === 'climate') return call('climate', isOn(e) ? 'turn_off' : 'turn_on', { entity_id: e.entity_id })
+    return call(d, 'toggle', { entity_id: e.entity_id })
+  }
   const sel = selected ? entities[selected] : undefined
   const active = devices.filter((d) => entities[d.entityId] && toggles(entities[d.entityId]!) && isOn(entities[d.entityId]))
   const switchable = devices.filter((d) => entities[d.entityId] && toggles(entities[d.entityId]!))
@@ -932,7 +924,7 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
           <span className={`grid size-8 shrink-0 place-items-center rounded-[9px] transition-colors ${on ? 'bg-foreground text-background' : 'bg-foreground/8 text-muted-foreground'}`}><Icon e={e} /></span>
           <span className="grid min-w-0">
             <b className="truncate font-medium text-sm">{nameOf(e)}</b>
-            <small className="truncate text-muted-foreground text-xs">{statusOf(e)}</small>
+            <small className="truncate text-muted-foreground text-xs">{statusOf(e, formatters)}</small>
           </span>
         </button>
         {toggles(e) && <Switch on={isOn(e)} label={`${nameOf(e)} power`} onChange={() => toggle(e)} />}
@@ -980,7 +972,7 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
               else onSelect(d.entityId)
             }}
             // the canvas sets the tooltip from these: one name, or every name in a group
-            data-title={`${nameOf(e)} · ${statusOf(e)}`}
+            data-title={`${nameOf(e)} · ${statusOf(e, formatters)}`}
             data-name={nameOf(e)}
             // a pin grouped with others under it shows "+n" (data-more, set by the canvas)
             // plain circles as in the site's viewer: dark and quiet when off, white with a soft halo when on
@@ -1009,7 +1001,7 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
               <span className="grid size-6 shrink-0 place-items-center rounded-[7px] bg-foreground/8 text-muted-foreground"><Icon e={entities[id]!} className="size-3.5" /></span>
               <span className="grid min-w-0">
                 <b className="truncate font-medium">{nameOf(entities[id]!)}</b>
-                <small className="truncate text-muted-foreground text-xs">{statusOf(entities[id]!)}</small>
+                <small className="truncate text-muted-foreground text-xs">{statusOf(entities[id]!, formatters)}</small>
               </span>
             </button>
           ))}
@@ -1058,7 +1050,7 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
 
       {/* the selected device's card */}
       {sel && (
-        <section key={sel.entity_id} aria-label={`${nameOf(sel)} controls`} className="pointer-events-auto absolute top-[var(--card-top,1rem)] right-[var(--card-right,1rem)] flex w-80 flex-col gap-4 rounded-2xl border border-border/60 bg-background/90 p-4 shadow-lg backdrop-blur">
+        <section key={sel.entity_id} aria-label={`${nameOf(sel)} controls`} className="ui-scroll pointer-events-auto absolute top-[var(--card-top,1rem)] right-[var(--card-right,1rem)] flex max-h-[calc(100%-var(--card-top,1rem)-1rem)] w-80 flex-col gap-4 overflow-y-auto rounded-2xl border border-border/60 bg-background/90 p-4 shadow-lg backdrop-blur">
           <header className="flex items-center gap-3">
             <button type="button" onClick={() => onSelect(null)} aria-label="Back to all devices" className="grid size-8 place-items-center rounded-full hover:bg-foreground/5">
               <Svg><path d="m15 18-6-6 6-6" /></Svg>
@@ -1067,10 +1059,10 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
               <b className="truncate font-semibold">{nameOf(sel)}</b>
               <small className="truncate text-muted-foreground text-xs">{areas.find((a) => a.id === devices.find((d) => d.entityId === sel.entity_id)?.anchor.area)?.name ?? 'Home'} · {sel.entity_id}</small>
             </span>
-            {toggles(sel) && <Switch on={isOn(sel)} label={`${nameOf(sel)} power`} onChange={() => toggle(sel)} />}
+            {toggles(sel) && domainOf(sel.entity_id) !== 'climate' && <Switch on={isOn(sel)} label={`${nameOf(sel)} power`} onChange={() => toggle(sel)} />}
           </header>
           <div className="grid gap-4">
-            <Controls e={sel} call={call} history={history[sel.entity_id] ?? []} layer={layer} onLayer={onLayer} areas={areas} />
+            <Controls e={sel} call={call} formatters={formatters} history={history[sel.entity_id] ?? []} layer={layer} onLayer={onLayer} areas={areas} />
           </div>
           {lastCall?.data.entity_id === sel.entity_id && (
             <code className="block overflow-x-auto whitespace-nowrap rounded-lg bg-foreground/5 px-3 py-2 font-mono text-[11px] text-muted-foreground">

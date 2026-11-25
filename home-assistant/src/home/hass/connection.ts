@@ -11,7 +11,7 @@ import {
   subscribeEntities,
 } from 'home-assistant-js-websocket'
 import { create } from 'zustand'
-import type { HassEntities } from '../entities'
+import { domainOf, type HassEntities } from '../entities'
 import { takeHassCallback } from './callback'
 
 /* The viewer's connection to the visitor's own Home Assistant: its sign-in (Home Assistant's own
@@ -26,6 +26,29 @@ const PENDING_KEY = 'pascal-ha-pending'
 
 export type HassStatus = 'idle' | 'redirecting' | 'connecting' | 'connected' | 'error'
 
+/** Per-entity metadata from Home Assistant's entity registry, used to resolve translations and icons. */
+export type EntityRegistryInfo = {
+  platform: string
+  translation_key?: string | null
+  display_precision?: number | null
+}
+
+/** Icon translation entry shape returned by Home Assistant's `frontend/get_icons`. */
+export type IconTranslationEntry = {
+  default?: string
+  state?: Record<string, string>
+  state_attributes?: Record<string, { default?: string; state?: Record<string, string> }>
+}
+
+export type HassIcons = {
+  /** `component[domain][device_class_or__]` */
+  entity_component: Record<string, Record<string, IconTranslationEntry>>
+  /** `entity[platform][domain][translation_key]` */
+  entity: Record<string, Record<string, Record<string, IconTranslationEntry>>>
+}
+
+const EMPTY_ICONS: HassIcons = { entity_component: {}, entity: {} }
+
 type HassState = {
   status: HassStatus
   /** The address last used, to fill in the form. */
@@ -35,13 +58,22 @@ type HassState = {
   entities: HassEntities
   /** Each entity's area name, from Home Assistant's registries (its own, else its device's). */
   areaOf: Record<string, string>
+  /** Each entity's platform and translation key, from Home Assistant's entity registry. */
+  registryOf: Record<string, EntityRegistryInfo>
+  /** Home Assistant's configured language (e.g. 'en') and temperature unit ('°C' or '°F'). */
+  language: string
+  temperatureUnit: string
+  /** Flat dotted translation map from `frontend/get_translations` (entity_component + entity). */
+  translations: Record<string, string>
+  /** Icon maps from `frontend/get_icons` (entity_component + entity). */
+  icons: HassIcons
   connection: Connection | null
   /** Picks up a sign-in that just came back, or this tab's key; does nothing without either. */
   resume: () => Promise<void>
   /** Sends the visitor to their Home Assistant's login page. */
   signIn: (address: string) => Promise<void>
   disconnect: () => void
-  call: (domain: string, service: string, data: Record<string, unknown>) => void
+  call: (domain: string, service: string, data: Record<string, unknown>) => Promise<boolean>
 }
 
 /** "myhome.duckdns.org:8123/" → "https://myhome.duckdns.org:8123". */
@@ -103,10 +135,20 @@ async function finishSignIn(code: string, state: string): Promise<AuthData> {
 type Registry = {
   areas: { area_id: string; name: string }[]
   devices: { id: string; area_id: string | null }[]
-  entities: { entity_id: string; area_id: string | null; device_id: string | null }[]
+  entities: {
+    entity_id: string
+    area_id: string | null
+    device_id: string | null
+    platform?: string
+    translation_key?: string | null
+    options?: { sensor?: { display_precision?: number | null } }
+  }[]
 }
 
-async function readAreas(connection: Connection): Promise<Record<string, string>> {
+async function readRegistry(connection: Connection): Promise<{
+  areaOf: Record<string, string>
+  registryOf: Record<string, EntityRegistryInfo>
+}> {
   const [areas, devices, entities] = await Promise.all([
     connection.sendMessagePromise<Registry['areas']>({ type: 'config/area_registry/list' }),
     connection.sendMessagePromise<Registry['devices']>({ type: 'config/device_registry/list' }),
@@ -114,13 +156,122 @@ async function readAreas(connection: Connection): Promise<Record<string, string>
   ])
   const areaName = new Map(areas.map((a) => [a.area_id, a.name]))
   const deviceArea = new Map(devices.map((d) => [d.id, d.area_id]))
-  const out: Record<string, string> = {}
+  const areaOf: Record<string, string> = {}
+  const registryOf: Record<string, EntityRegistryInfo> = {}
   for (const e of entities) {
     const id = e.area_id ?? (e.device_id ? deviceArea.get(e.device_id) : null)
     const name = id ? areaName.get(id) : undefined
-    if (name) out[e.entity_id] = name
+    if (name) areaOf[e.entity_id] = name
+    if (e.platform) {
+      registryOf[e.entity_id] = {
+        platform: e.platform,
+        translation_key: e.translation_key ?? null,
+        display_precision: e.options?.sensor?.display_precision ?? null,
+      }
+    }
+  }
+  return { areaOf, registryOf }
+}
+
+type HassConfigResponse = {
+  language?: string
+  unit_system?: { temperature?: string }
+  components?: string[]
+}
+
+function platformsForTranslations(registryOf: Record<string, EntityRegistryInfo>): string[] {
+  const set = new Set<string>()
+  for (const info of Object.values(registryOf)) {
+    if (info.translation_key && info.platform) set.add(info.platform)
+  }
+  return [...set].sort()
+}
+
+function climatePlatforms(registryOf: Record<string, EntityRegistryInfo>): string[] {
+  const set = new Set<string>()
+  for (const [entityId, info] of Object.entries(registryOf)) {
+    if (domainOf(entityId) === 'climate' && info.platform) set.add(info.platform)
+  }
+  return [...set].sort()
+}
+
+async function readConfig(connection: Connection): Promise<{ language: string; temperatureUnit: string }> {
+  try {
+    const cfg = await connection.sendMessagePromise<HassConfigResponse>({ type: 'get_config' })
+    return {
+      language: cfg.language || 'en',
+      temperatureUnit: cfg.unit_system?.temperature || '°C',
+    }
+  } catch {
+    return { language: 'en', temperatureUnit: '°C' }
+  }
+}
+
+async function readTranslations(
+  connection: Connection,
+  language: string,
+  platforms: string[],
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  try {
+    const comp = await connection.sendMessagePromise<{ resources?: Record<string, string> }>({
+      type: 'frontend/get_translations',
+      language,
+      category: 'entity_component',
+    })
+    if (comp?.resources) Object.assign(out, comp.resources)
+  } catch {
+    // Fall back to bundled English strings.
+  }
+  if (platforms.length > 0) {
+    try {
+      const ent = await connection.sendMessagePromise<{ resources?: Record<string, string> }>({
+        type: 'frontend/get_translations',
+        language,
+        category: 'entity',
+        integration: platforms,
+      })
+      if (ent?.resources) Object.assign(out, ent.resources)
+    } catch {
+      // Fall back to entity_component / bundled English strings.
+    }
   }
   return out
+}
+
+async function readClimateIcons(connection: Connection, platforms: string[]): Promise<HassIcons> {
+  const entity_component: HassIcons['entity_component'] = {}
+  const entity: HassIcons['entity'] = {}
+  try {
+    const comp = await connection.sendMessagePromise<{
+      resources?: Record<string, Record<string, IconTranslationEntry>>
+    }>({
+      type: 'frontend/get_icons',
+      category: 'entity_component',
+      integration: 'climate',
+    })
+    if (comp?.resources?.climate) entity_component.climate = comp.resources.climate
+  } catch {
+    // Fall back to static named-import icon table.
+  }
+  await Promise.all(
+    platforms.map(async (platform) => {
+      try {
+        const res = await connection.sendMessagePromise<{
+          resources?: Record<string, Record<string, Record<string, IconTranslationEntry>>>
+        }>({
+          type: 'frontend/get_icons',
+          category: 'entity',
+          integration: platform,
+        })
+        const platformIcons = res?.resources?.[platform]
+        if (platformIcons) entity[platform] = platformIcons
+      } catch {
+        // Ignore missing platform icons; static fallback applies.
+      }
+    }),
+  )
+  return { entity_component, entity }
 }
 
 let resuming: Promise<void> | null = null
@@ -131,20 +282,48 @@ export const useHass = create<HassState>((set, get) => {
     set({ status: 'connecting', error: null, hassUrl: auth.data.hassUrl })
     try {
       const connection = await createConnection({ auth })
-      const areaOf = await readAreas(connection)
+      const [{ areaOf, registryOf }, { language, temperatureUnit }] = await Promise.all([
+        readRegistry(connection),
+        readConfig(connection),
+      ])
+      let loadedTranslationKey = platformsForTranslations(registryOf).join(',')
+      let loadedIconKey = climatePlatforms(registryOf).join(',')
+      const [translations, icons] = await Promise.all([
+        readTranslations(connection, language, platformsForTranslations(registryOf)),
+        readClimateIcons(connection, climatePlatforms(registryOf)),
+      ])
       unsubscribe?.()
       unsubscribe = subscribeEntities(connection, (entities) => set({ entities: entities as unknown as HassEntities }))
-      // rooms change while the plan is open (a device put in an area): read them again, once a burst settles
+      // rooms and entity registry metadata change while the plan is open: read them again, once a burst settles
       let pending = 0
       const reread = () => {
         window.clearTimeout(pending)
-        pending = window.setTimeout(() => void readAreas(connection).then((a) => set({ areaOf: a })), 400)
+        pending = window.setTimeout(() => {
+          void readRegistry(connection).then(async ({ areaOf: a, registryOf: r }) => {
+            set({ areaOf: a, registryOf: r })
+            const nextTransPlatforms = platformsForTranslations(r)
+            const nextTransKey = nextTransPlatforms.join(',')
+            const nextIconPlatforms = climatePlatforms(r)
+            const nextIconKey = nextIconPlatforms.join(',')
+            const lang = get().language
+            if (nextTransKey !== loadedTranslationKey) {
+              loadedTranslationKey = nextTransKey
+              const nextTranslations = await readTranslations(connection, lang, nextTransPlatforms)
+              set({ translations: nextTranslations })
+            }
+            if (nextIconKey !== loadedIconKey) {
+              loadedIconKey = nextIconKey
+              const nextIcons = await readClimateIcons(connection, nextIconPlatforms)
+              set({ icons: nextIcons })
+            }
+          })
+        }, 400)
       }
       connection.addEventListener('ready', reread)
       for (const event of ['area_registry_updated', 'device_registry_updated', 'entity_registry_updated']) {
         void connection.subscribeEvents(reread, event)
       }
-      set({ status: 'connected', connection, areaOf })
+      set({ status: 'connected', connection, areaOf, registryOf, language, temperatureUnit, translations, icons })
     } catch (failure) {
       if (failure === ERR_INVALID_AUTH) saveTokens(null)
       set({ status: 'error', error: explain(failure, auth.data.hassUrl), connection: null })
@@ -157,6 +336,11 @@ export const useHass = create<HassState>((set, get) => {
     error: null,
     entities: {},
     areaOf: {},
+    registryOf: {},
+    language: 'en',
+    temperatureUnit: '°C',
+    translations: {},
+    icons: EMPTY_ICONS,
     connection: null,
 
     resume: () => {
@@ -206,15 +390,31 @@ export const useHass = create<HassState>((set, get) => {
       get().connection?.close()
       saveTokens(null)
       resuming = null
-      set({ status: 'idle', connection: null, entities: {}, areaOf: {}, error: null })
+      set({
+        status: 'idle',
+        connection: null,
+        entities: {},
+        areaOf: {},
+        registryOf: {},
+        language: 'en',
+        temperatureUnit: '°C',
+        translations: {},
+        icons: EMPTY_ICONS,
+        error: null,
+      })
     },
 
-    call: (domain, service, data) => {
+    call: async (domain, service, data) => {
       const connection = get().connection
-      if (!connection) return
-      callService(connection, domain, service, data).catch((failure: unknown) =>
+      if (!connection) return false
+      try {
+        await callService(connection, domain, service, data)
+        return true
+      } catch (failure: unknown) {
         // Home Assistant answers a failed call with { code, message }, not an Error
-        set({ error: (failure as { message?: string } | null)?.message ?? `${domain}.${service} failed` }))
+        set({ error: (failure as { message?: string } | null)?.message ?? `${domain}.${service} failed` })
+        return false
+      }
     },
   }
 })

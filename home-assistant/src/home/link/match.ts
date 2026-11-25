@@ -29,7 +29,8 @@ export function wantsOf(e: EntityInfo): Wants {
   switch (domainOf(e.entity_id)) {
     // a light goes on a fan only when it is the fan's own ("Ceiling fan light"), never for want of a lamp
     case 'light': return /\bfans?\b|ventilateur/.test(words(`${e.name} ${e.entity_id.replace(/[._]/g, ' ')}`).join(' ')) ? pick(['ceiling-fan', 'fan', 'light']) : pick(['light'])
-    case 'climate': return pick(['ac', 'heater', 'thermostat'], ['fan'])
+    // never a fan for want of an AC: a fan drawn in the plan is the fan's, not a climate unit's
+    case 'climate': return pick(['ac', 'heater', 'thermostat'])
     case 'fan': return pick(['fan', 'ceiling-fan', 'purifier'])
     case 'humidifier': return pick(['humidifier', 'purifier'])
     case 'media_player':
@@ -78,8 +79,9 @@ export type Candidate = { thingId: string; score: number; why: string[] }
  * sure: the only one of its kind left in its room. likely: the best by its words, clearly.
  * ask: several fit equally; a person picks. room: it belongs to its room, not a thing (a
  * thermometer). home: it belongs to no place (a person, the weather). missing: nothing in the plan
- * can be it (a lamp nobody drew). unplaced: in no room Home Assistant knows of, and more than one
- * thing in the house could be it; it waits for an area rather than ask across the whole house.
+ * can be it (a lamp nobody drew). unplaced: in no area in Home Assistant, so it is never placed by
+ * itself, even where only one thing in the house could be it; it waits for an area, or a person
+ * links it by hand.
  */
 export type LinkStatus = 'sure' | 'likely' | 'ask' | 'room' | 'home' | 'missing' | 'unplaced'
 
@@ -238,16 +240,19 @@ export function linkHome(things: Thing[], entities: EntityInfo[], rooms: Room[],
   }
   const free = (o: (typeof open)[number]) => o.candidates.filter((c) => !held.has(slot(c.thingId, o.e.entity_id)))
   const pending = () => open.filter((o) => !links.has(o.e.entity_id) && !o.waiting)
+  // what is placed by itself: only an entity Home Assistant puts in an area. One in no area could be
+  // anything anywhere (a demo's whole house of devices), so it never takes a thing by elimination
+  const placeable = () => pending().filter((o) => o.e.area)
 
   // sure, again and again: an entity with one thing left that no other entity can take; each one
   // settled can leave the next with one
   for (let changed = true; changed; ) {
     changed = false
-    for (const o of pending()) {
+    for (const o of placeable()) {
       const left = free(o)
       if (left.length !== 1 || !o.roomId) continue
       const c = left[0]!
-      const rivals = pending().filter((p) => p !== o && (!!p.roomId || !o.roomId) && free(p).some((d) => slot(d.thingId, p.e.entity_id) === slot(c.thingId, o.e.entity_id)))
+      const rivals = placeable().filter((p) => p !== o && (!!p.roomId || !o.roomId) && free(p).some((d) => slot(d.thingId, p.e.entity_id) === slot(c.thingId, o.e.entity_id)))
       if (rivals.length) continue
       settle(o, 'sure', c, 'the only one of its kind in its room')
       changed = true
@@ -257,10 +262,10 @@ export function linkHome(things: Thing[], entities: EntityInfo[], rooms: Room[],
   // likely: ahead of the rest by its words, and the best for that thing too
   for (let changed = true; changed; ) {
     changed = false
-    for (const o of pending()) {
+    for (const o of placeable()) {
       const [best, next] = free(o)
       if (!best || (next && best.score - next.score < CLEAR_LEAD)) continue
-      const rivals = pending().filter((p) => p !== o && (!!p.roomId || !o.roomId) && free(p).some((d) => slot(d.thingId, p.e.entity_id) === slot(best.thingId, o.e.entity_id) && d.score >= best.score))
+      const rivals = placeable().filter((p) => p !== o && (!!p.roomId || !o.roomId) && free(p).some((d) => slot(d.thingId, p.e.entity_id) === slot(best.thingId, o.e.entity_id) && d.score >= best.score))
       if (rivals.length) continue
       settle(o, 'likely', best, next ? `clearly ahead: ${best.why.join(', ')}` :'the only one of its kind it could be')
       changed = true

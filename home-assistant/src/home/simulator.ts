@@ -271,11 +271,14 @@ export function createHomeSimulator(start: HassEntities, areaOf: Record<string, 
             const d = domainOf(e.entity_id)
             if (d === 'climate' && e.state !== 'off') {
               const k = climateStrength(e)
-              const act = hvacAction({ ...e, attributes: { ...e.attributes, current_temperature: a.temperature } })
-              const target = Number(e.attributes.temperature ?? 21)
-              if (act === 'cooling' || act === 'heating') temperature = approach(temperature, target, 0.05 * k, dt)
-              if (act === 'cooling') humidity = approach(humidity, 44, 0.02 * k, dt)
-              if (act === 'drying') humidity = approach(humidity, 36, 0.05 * k, dt)
+              const act = hvacAction({ ...e, attributes: { ...e.attributes, current_temperature: a.temperature, hvac_action: undefined } })
+              const coolTarget = Number(e.attributes.temperature ?? e.attributes.target_temp_high ?? 21)
+              const heatTarget = Number(e.attributes.temperature ?? e.attributes.target_temp_low ?? 21)
+              if (act === 'cooling') temperature = approach(temperature, coolTarget, 0.05 * k, dt)
+              if (act === 'heating') temperature = approach(temperature, heatTarget, 0.05 * k, dt)
+              const targetHum = typeof e.attributes.humidity === 'number' ? e.attributes.humidity : undefined
+              if (act === 'cooling') humidity = approach(humidity, targetHum ?? 44, 0.02 * k, dt)
+              if (act === 'drying') humidity = approach(humidity, targetHum ?? 36, 0.05 * k, dt)
               pm25 = approach(pm25, 6, 0.02 * k, dt)
             }
             if (d === 'fan' && e.state === 'on') {
@@ -308,7 +311,10 @@ export function createHomeSimulator(start: HassEntities, areaOf: Record<string, 
             const from = e.attributes.power_of as string | undefined
             if (from && next[from]) next[e.entity_id] = { ...e, state: String(next[from]!.attributes.current_power_w ?? 0) }
           } else if (d === 'climate' && a) {
-            next[e.entity_id] = { ...e, attributes: { ...e.attributes, current_temperature: Math.round(a.temperature * 10) / 10, current_humidity: Math.round(a.humidity) } }
+            const curTemp = Math.round(a.temperature * 10) / 10
+            const curHum = Math.round(a.humidity)
+            const act = hvacAction({ ...e, attributes: { ...e.attributes, current_temperature: curTemp, hvac_action: undefined } })
+            next[e.entity_id] = { ...e, attributes: { ...e.attributes, current_temperature: curTemp, current_humidity: curHum, hvac_action: act } }
           } else if (d === 'humidifier' && a) {
             const want = Number(e.attributes.humidity ?? 50)
             next[e.entity_id] = { ...e, attributes: { ...e.attributes, current_humidity: Math.round(a.humidity), action: !isOn(e) ? 'off' : a.humidity < want - 1 ? 'humidifying' : 'idle' } }
@@ -379,11 +385,43 @@ function apply(e: HassEntity, domain: string, service: string, data: ServiceCall
   }
 
   if (d === 'climate') {
-    if (service === 'turn_off') return with_('off')
-    if (service === 'turn_on') return with_(lastHvac[e.entity_id] ?? 'cool')
-    if (service === 'set_hvac_mode') return with_(String(data.hvac_mode))
-    if (service === 'set_temperature') return with_(e.state, { temperature: Number(data.temperature) })
+    const withAction = (state: string, attrs: Record<string, unknown> = {}) => {
+      const merged = with_(state, attrs)
+      const act = hvacAction({ ...merged, attributes: { ...merged.attributes, hvac_action: undefined } })
+      return { ...merged, attributes: { ...merged.attributes, hvac_action: act } }
+    }
+    if (service === 'turn_off') return withAction('off')
+    if (service === 'turn_on') return withAction(lastHvac[e.entity_id] ?? 'cool')
+    if (service === 'set_hvac_mode') {
+      const mode = String(data.hvac_mode)
+      if (mode === 'heat_cool' && (Number(at.supported_features ?? 0) & 2) !== 0) {
+        const base = Number(at.temperature ?? 21)
+        const min = Number(at.min_temp ?? 16)
+        const max = Number(at.max_temp ?? 30)
+        const low = typeof at.target_temp_low === 'number' ? at.target_temp_low : Math.max(min, base - 2)
+        const high = typeof at.target_temp_high === 'number' ? at.target_temp_high : Math.min(max, base + 2)
+        return withAction(mode, { temperature: null, target_temp_low: low, target_temp_high: high })
+      }
+      if (at.temperature == null && (typeof at.target_temp_low === 'number' || typeof at.target_temp_high === 'number')) {
+        const low = Number(at.target_temp_low ?? 19)
+        const high = Number(at.target_temp_high ?? 23)
+        return withAction(mode, { temperature: Math.round(((low + high) / 2) * 2) / 2, target_temp_low: null, target_temp_high: null })
+      }
+      return withAction(mode)
+    }
+    if (service === 'set_temperature') {
+      const patch: Record<string, unknown> = {}
+      if (data.temperature !== undefined) patch.temperature = Number(data.temperature)
+      if (data.target_temp_low !== undefined) patch.target_temp_low = Number(data.target_temp_low)
+      if (data.target_temp_high !== undefined) patch.target_temp_high = Number(data.target_temp_high)
+      const nextState = data.hvac_mode !== undefined ? String(data.hvac_mode) : e.state
+      return withAction(nextState, patch)
+    }
+    if (service === 'set_humidity') return withAction(e.state, { humidity: Number(data.humidity) })
     if (service === 'set_fan_mode') return with_(e.state, { fan_mode: data.fan_mode })
+    if (service === 'set_swing_mode') return with_(e.state, { swing_mode: data.swing_mode })
+    if (service === 'set_swing_horizontal_mode') return with_(e.state, { swing_horizontal_mode: data.swing_horizontal_mode })
+    if (service === 'set_preset_mode') return with_(e.state, { preset_mode: data.preset_mode })
   }
 
   if (d === 'fan') {
