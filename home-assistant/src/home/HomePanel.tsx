@@ -278,17 +278,6 @@ function Send({ placeholder, initial = '', button, type = 'text', clear = false,
   )
 }
 
-/** How the Home tab groups the entities that are not a thing in a room. */
-const HOME_GROUPS = [
-  ['Weather and outside', ['weather', 'air_quality', 'geo_location']],
-  ['Scenes and actions', ['scene', 'button']],
-  ['Family', ['calendar', 'todo', 'timer_list', 'notify', 'sensor', 'binary_sensor']],
-  ['Assist', ['conversation', 'tts', 'stt', 'wake_word', 'ai_task']],
-  ['Settings', ['number', 'select', 'text', 'date', 'time', 'datetime']],
-  ['Cameras and images', ['image', 'image_processing']],
-  ['Updates', ['update']],
-] as const
-
 const CMD: Record<string, string> = { power: 'Power', volume_down: 'Vol −', volume_up: 'Vol +', next: 'Next', cooler: 'Cooler', warmer: 'Warmer', open: 'Open', close: 'Close' }
 
 function simulateLabel(dc: string, on: boolean) {
@@ -680,12 +669,8 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
   const active = devices.filter((d) => entities[d.entityId] && toggles(entities[d.entityId]!) && isOn(entities[d.entityId]))
   const switchable = devices.filter((d) => entities[d.entityId] && toggles(entities[d.entityId]!))
   const layers = (Object.keys(FIELDS) as FieldKind[]).filter((k) => Object.values(entities).some((e) => fieldOf(e) === k))
-  const [tab, setTab] = useState<'rooms' | 'home'>('rooms')
   const lastGroup = useRef<string | null>(null)
   const [menu, setMenu] = useState<{ ids: string[]; x: number; y: number } | null>(null)
-  // everything Home Assistant has that is not a thing placed in a room
-  const placed = new Set(devices.map((d) => d.entityId))
-  const homeOnly = Object.values(entities).filter((e) => !placed.has(e.entity_id))
 
   // a plain function, not a component, so rows aren't remounted every tick
   const row = (e: HassEntity) => {
@@ -786,33 +771,16 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
           <b className="font-semibold">{title}</b>
           <span className="flex items-center gap-1.5 text-muted-foreground text-xs"><i className="size-1.5 rounded-full bg-emerald-400" />{active.length} of {switchable.length} on</span>
         </header>
-        <div className="flex gap-1 border-border/60 border-b p-1.5" role="tablist">
-          {(['rooms', 'home'] as const).map((t) => (
-            <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
-              className={`flex-1 rounded-full px-3 py-1 text-xs ${tab === t ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-foreground/5'}`}>
-              {t === 'rooms' ? `Rooms · ${devices.length}` : `Home · ${homeOnly.length}`}
-            </button>
+        {/* only what is linked to the plan, by room: a device is linked by clicking its furniture */}
+        <div className="ui-scroll overflow-y-auto py-1">
+          {areas.map((area) => (
+            <section key={area.id} aria-label={area.name}>
+              <h3 className="px-4 pt-2 pb-1 font-medium text-muted-foreground text-xs">{area.name}</h3>
+              {devices.filter((d) => d.anchor.area === area.id).map((d) => entities[d.entityId] && row(entities[d.entityId]!))}
+            </section>
           ))}
         </div>
-        <div className="ui-scroll overflow-y-auto py-1">
-          {tab === 'rooms'
-            ? areas.map((area) => (
-              <section key={area.id} aria-label={area.name}>
-                <h3 className="px-4 pt-2 pb-1 font-medium text-muted-foreground text-xs">{area.name}</h3>
-                {devices.filter((d) => d.anchor.area === area.id).map((d) => entities[d.entityId] && row(entities[d.entityId]!))}
-              </section>
-            ))
-            : HOME_GROUPS.map(([name, domains]) => {
-              const list = homeOnly.filter((e) => (domains as readonly string[]).includes(domainOf(e.entity_id)))
-              return list.length ? (
-                <section key={name} aria-label={name}>
-                  <h3 className="px-4 pt-2 pb-1 font-medium text-muted-foreground text-xs">{name}</h3>
-                  {list.map(row)}
-                </section>
-              ) : null
-            })}
-        </div>
-        {tab === 'rooms' && layers.length > 0 && (
+        {layers.length > 0 && (
           <footer className="border-border/60 border-t px-3 py-3">
             <Seg<string> label="Floor shows" value={layer ?? 'none'} onPick={(v) => onLayer(v === 'none' ? null : (v as FieldKind))}
               options={[{ v: 'none', t: 'Nothing' }, ...layers.map((k) => ({ v: k as string, t: FIELDS[k].label }))]} />

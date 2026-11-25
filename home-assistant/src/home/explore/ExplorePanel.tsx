@@ -18,6 +18,7 @@ import { OutreachLinks } from './OutreachLinks'
 import { BottomSheet } from './BottomSheet'
 import { FloorStack } from './FloorStack'
 import { MiniPlan } from './MiniPlan'
+import { useRoomHover } from './roomHover'
 import { splitFormattedArea } from './planGeometry'
 
 export type LevelEntry = {
@@ -27,7 +28,6 @@ export type LevelEntry = {
 }
 
 type LevelLike = { id: string; type?: string; level?: number; name?: string }
-type HoveredId = ReturnType<typeof useViewer.getState>['hoveredId']
 
 /** Extracts sorted floor entries (lowest to highest) from the viewer's scene nodes. */
 export function useSceneLevels(source: ViewerSource): LevelEntry[] {
@@ -78,6 +78,8 @@ export function ExplorePanel({
   onOpenChange,
   mobileOpen,
   onMobileOpenChange,
+  selectedRoomId = null,
+  onRoomSelect,
 }: {
   projectName: string | null
   ownerName: string | null
@@ -89,12 +91,16 @@ export function ExplorePanel({
   onOpenChange: (open: boolean) => void
   mobileOpen: boolean
   onMobileOpenChange: (open: boolean) => void
+  /** The room picked for linking: it stays lit (in colour, in 3D) until picked again or let go. */
+  selectedRoomId?: string | null
+  /** A room was picked, or let go (null). */
+  onRoomSelect?: (zoneId: string | null) => void
 }) {
   const i18n = usePascalI18n()
   const locale = useLocale()
   const selection = useViewer((s) => s.selection)
   const focusedUnitId = useViewer((s) => s.focusedUnitId)
-  const hoveredId = useViewer((s) => s.hoveredId)
+  const hoveredId = useRoomHover((s) => s.id)
   const unit = useViewer((s) => s.unit)
   const hoveredZone = useRef<string | null>(null)
 
@@ -103,17 +109,16 @@ export function ExplorePanel({
     if (!activeHover) return
     if (zoneId && activeHover !== zoneId) return
     hoveredZone.current = null
-    if (useViewer.getState().hoveredId === activeHover) {
-      useViewer.getState().setHoveredId(null)
-    }
+    if (useRoomHover.getState().id === activeHover) useRoomHover.getState().set(null)
   }, [])
 
   const hoverRoom = useCallback((zoneId: string) => {
+    // the room's label in 3D lights up, never Pascal's blue floor highlight
     hoveredZone.current = zoneId
-    useViewer.getState().setHoveredId(zoneId as HoveredId)
+    useRoomHover.getState().set(zoneId)
   }, [])
 
-  // Never leave a stale 3D room highlight behind when the panel collapses, closes, or unmounts.
+  // Never leave a room label lit when the panel collapses, closes, or unmounts.
   useEffect(() => () => clearHover(), [clearHover])
   useEffect(() => {
     if (compact ? !mobileOpen : !open) clearHover()
@@ -139,8 +144,10 @@ export function ExplorePanel({
     [clearHover, source],
   )
 
-  // A room is only ever highlighted while hovered: a click frames it and selects nothing, so no
-  // room stays lit (and two rooms never look picked at once). Its floor is shown if it is another.
+  // A click frames a room (its floor shown if it is another) and picks it for linking: it develops
+  // into colour in 3D and stays picked, one at a time, until "Done" or Escape lets it go (a second
+  // click, or a double click, never does). The viewer's own selection stays empty, so its highlight
+  // is only ever the hover's.
   const selectRoom = useCallback(
     (zoneId: string) => {
       const zone = source.nodes[zoneId as keyof typeof source.nodes] as { type?: string; parentId?: string | null } | undefined
@@ -148,12 +155,13 @@ export function ExplorePanel({
       const levelId = (zone?.type === 'zone' && zone.parentId ? zone.parentId : viewer.selection.levelId) as typeof viewer.selection.levelId
       viewer.setSelection({ ...viewer.selection, levelId, zoneId: null, selectedIds: [] })
       frameViewerNode(zoneId, source)
+      onRoomSelect?.(zoneId)
       if (compact) {
         clearHover()
         onMobileOpenChange(false)
       }
     },
-    [clearHover, source, compact, onMobileOpenChange],
+    [clearHover, source, compact, onMobileOpenChange, onRoomSelect],
   )
 
   const selectBuilding = useCallback(() => {
@@ -191,6 +199,9 @@ export function ExplorePanel({
       </div>
     ) : null
 
+  const pickedRoom = selectedRoomId
+    ? sections.flatMap((section) => (section.kind === 'units' ? [] : section.rows)).find((row) => row.id === selectedRoomId)?.label
+    : undefined
   const roomList =
     sections.length > 0 ? (
       <div className="flex flex-col gap-3">
@@ -203,12 +214,13 @@ export function ExplorePanel({
             <ul className="flex flex-col gap-0.5">
               {section.rows.map((row) => {
                 const isRoom = section.kind !== 'units'
-                const active = !isRoom && row.id === focusedUnitId
+                const active = isRoom ? row.id === selectedRoomId : row.id === focusedUnitId
                 const syncedHover = isRoom && row.id === hoveredId
                 return (
                   <li key={row.id}>
                     <button
-                      aria-current={active ? 'location' : undefined}
+                      aria-current={!isRoom && active ? 'location' : undefined}
+                      aria-pressed={isRoom ? active : undefined}
                       className={`flex w-full items-center gap-2.5 rounded-full px-2.5 text-left text-xs transition-colors focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2 ${
                         compact ? 'min-h-11 py-2' : 'py-1.5'
                       } ${
@@ -258,6 +270,20 @@ export function ExplorePanel({
             </ul>
           </div>
         ))}
+        {pickedRoom && (
+          <div className="flex items-center gap-2 rounded-2xl bg-foreground/[0.05] px-3 py-2">
+            <p className="min-w-0 flex-1 text-muted-foreground text-xs leading-snug">
+              Click any furniture in {pickedRoom} to link a device.
+            </p>
+            <button
+              className="h-7 shrink-0 rounded-full px-3 font-medium text-foreground text-xs transition-colors hover:bg-foreground/[0.08] focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+              onClick={() => onRoomSelect?.(null)}
+              type="button"
+            >
+              Done
+            </button>
+          </div>
+        )}
       </div>
     ) : levels.length > 0 ? (
       <p className="px-1 py-2 text-muted-foreground text-xs">No named rooms on this floor.</p>

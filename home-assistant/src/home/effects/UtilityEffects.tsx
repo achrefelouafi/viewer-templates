@@ -2,7 +2,7 @@ import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { ALERT, domainOf, isOn, openness, type V3 } from '../entities'
-import { additiveSprite, approach, livePosition, useFlow } from './common'
+import { approach, livePosition, useFlow } from './common'
 import { flowLineMaterial, gaugeMaterial, ringsMaterial } from './materials'
 import type { FamilyProps } from './SafetyEffects'
 
@@ -121,17 +121,14 @@ export function RobotEffect({ entity, device }: FamilyProps) {
 /* ---------------- smart plugs ---------------- */
 
 /** Family "energy": power runs along the cable from the electrical panel to the plug, faster and
-    hotter in colour the more it draws, and the plug glows while it is on. */
+    hotter in colour the more it draws. */
 export function EnergyEffect({ entity, device }: FamilyProps) {
   const run = useRun(device.path, 0.02)
-  const glow = useMemo(() => additiveSprite(), [])
   const k = useRef(0)
   useFrame((st, dt) => {
     const w = Number(entity.attributes.current_power_w ?? 0)
     k.current = approach(k.current, Math.min(1, w / 2000), dt, 3)
     const col = w < 300 ? '#3ddc97' : w < 1200 ? '#ffc247' : '#ff7a45'
-    glow.color.set(col)
-    glow.opacity = isOn(entity) ? 0.5 + k.current * 0.4 : 0
     if (!run) return
     setColor(run.mat, col)
     run.mat.uniforms.uT.value = st.clock.elapsedTime
@@ -139,12 +136,7 @@ export function EnergyEffect({ entity, device }: FamilyProps) {
     run.mat.uniforms.uSpeed.value = -(0.4 + k.current * 3)
     run.mat.uniforms.uBase.value = isOn(entity) ? 0.3 : 0.08
   })
-  return (
-    <>
-      {run && <mesh geometry={run.geo} material={run.mat} renderOrder={5} />}
-      <sprite position={device.anchor.position} scale={0.5} material={glow} />
-    </>
-  )
+  return run ? <mesh geometry={run.geo} material={run.mat} renderOrder={5} /> : null
 }
 
 /* ---------------- water heaters ---------------- */

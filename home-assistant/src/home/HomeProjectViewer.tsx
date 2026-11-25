@@ -1,7 +1,8 @@
 import { type AnyNodeId, initSpatialGridSync, operateItem, sceneRegistry, toggleDoorOpenState, toggleWindowOpenState, useInteractive, useScene } from '@pascal-app/core'
 import { InteractiveSystem, SceneEnvironment, useViewer, Viewer } from '@pascal-app/viewer'
-import { SceneLoader, selectViewerLevel, useViewerFloorDisplay, type ViewerSource } from '@pascal-app/viewer/ui'
+import { frameViewerNode, SceneLoader, selectViewerLevel, useViewerFloorDisplay, type ViewerSource } from '@pascal-app/viewer/ui'
 import { useThree } from '@react-three/fiber'
+import { Tag, X } from 'lucide-react'
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type { SceneResponse } from '../pascal'
@@ -9,9 +10,12 @@ import { pluginInstallStateOf, publishedSceneSetup } from '../runtime/plugins'
 import { CameraRig, type CameraView } from './CameraRig'
 import type { Area, FieldKind } from './entities'
 import { livePosition } from './effects/common'
-import { HomeOverlay, HomeScene, useHomeLayer } from './HomeLayer'
+import { type HomeLayer, HomeOverlay, HomeScene, useHomeLayer } from './HomeLayer'
 import { ExplorePanel, useSceneLevels } from './explore/ExplorePanel'
+import { RoomLabels } from './explore/RoomLabels'
 import { useIsCompact } from './explore/useIsCompact'
+import { insideOutline, roomOf } from './sketch/roomInk'
+import { readStore, updateStore } from './storage'
 import { ThemeSwitch } from './sketch/ThemeSwitch'
 
 /* A Pascal project as the effects lab shows its home (src/lab/Lab.tsx), with the visitor's own
@@ -123,6 +127,45 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
   } as CSSProperties
   // an item clicked on the plan opens its links where a device's controls would: one card at a time
   const [itemId, setItemId] = useState<string | null>(null)
+  // a room picked in the explore panel develops into colour, and its furniture can then be linked
+  const [roomId, setRoomId] = useState<string | null>(null)
+  const pickRoom = useCallback((id: string | null) => {
+    setRoomId(id)
+    setItemId(null)
+    setSelected(null)
+  }, [])
+  // the rooms' labels in 3D, on or off; the choice is kept with the visitor's links (`storage.ts`)
+  const [labels, setLabels] = useState(() => readStore().preferences.roomLabels)
+  const toggleLabels = useCallback(() => {
+    const on = !readStore().preferences.roomLabels
+    updateStore((store) => {
+      store.preferences.roomLabels = on
+    })
+    setLabels(on)
+  }, [])
+  const roomName = roomId ? ((nodes[roomId as keyof typeof nodes] as { name?: string } | undefined)?.name || 'room') : null
+  // a room's label in 3D picks it as the panel's list does: framed, then picked
+  const pickRoomLabel = useCallback((id: string) => {
+    frameViewerNode(id, source)
+    pickRoom(id)
+  }, [source, pickRoom])
+  // Escape lets the room go; so does showing another floor
+  useEffect(() => {
+    if (!roomId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const t = e.target as HTMLElement | null
+      if (t?.closest('input, textarea, select, [contenteditable="true"]')) return
+      pickRoom(null)
+    }
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [roomId, pickRoom])
+  const shownLevel = useViewer((s) => s.selection.levelId)
+  useEffect(() => {
+    const zone = roomId ? (nodes[roomId as keyof typeof nodes] as { parentId?: string | null } | undefined) : undefined
+    if (roomId && (!zone || (shownLevel && zone.parentId !== shownLevel))) pickRoom(null)
+  }, [roomId, shownLevel, nodes, pickRoom])
   const kept = useRef(home.kept)
   kept.current = home.kept
   const pickItem = useCallback((id: string | null) => {
@@ -160,27 +203,45 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
         <CameraRig device={device} group={group} home={view} />
         {import.meta.env.DEV && <DevHandle />}
         <InteractiveSystem />
-        {/* a click on an item opens its links; no hover, no room highlight */}
-        <ItemPicker nodes={nodes} onPick={pickItem} />
-        {/* the guided tour's wireframe over everything but what Home Assistant drives, and their effects */}
-        <HomeScene home={home} layer={layer} onPress={press} pins={pins} selected={selected} />
+        {/* in the picked room, a click on a piece of furniture opens its links */}
+        <ItemPicker home={home} nodes={nodes} onPick={pickItem} roomId={roomId} source={source} />
+        {/* each room of the floor shown, named on the plan: a label picks its room */}
+        {labels && <RoomLabels onPick={pickRoomLabel} roomId={roomId} source={source} />}
+        {/* the guided tour's wireframe over everything but what Home Assistant drives and the picked room, and their effects */}
+        <HomeScene home={home} layer={layer} onPress={press} pins={pins} room={roomId} selected={selected} />
       </Viewer>
 
       <div className="contents" style={cardPlace}>
       <HomeOverlay home={home} itemId={itemId} layer={layer} onCloseItem={() => setItemId(null)} onGroup={zoomTo} onLayer={setLayer} onSelect={select} pins={pins}
-        selected={selected} title={title} />
+        roomId={roomId} selected={selected} title={title} />
 
       </div>
 
       {/* the tour viewer's explore panel: Pascal's links, the project, its floors, live plan and rooms */}
       <ExplorePanel compact={compact} embed={false} levels={levels} mobileOpen={mobileExploreOpen} onMobileOpenChange={setMobileExploreOpen}
-        onOpenChange={setExploreOpen} open={exploreOpen} ownerName={ownerName} projectName={title} source={source} />
+        onOpenChange={setExploreOpen} onRoomSelect={pickRoom} open={exploreOpen} ownerName={ownerName} projectName={title} selectedRoomId={roomId} source={source} />
 
-      {/* light or dark, as in the lab */}
-      <ThemeSwitch className="absolute bottom-4 left-1/2 z-30 -translate-x-1/2 sm:bottom-6" />
+      {/* bottom right (over the Home Assistant pill on a phone): let the picked room go (not everyone knows Escape, and a tablet has none),
+          the rooms' labels on or off, and light or dark */}
+      <div className="pointer-events-none absolute right-4 bottom-[4.75rem] z-30 flex flex-wrap items-center justify-end gap-2 sm:right-6 sm:bottom-6">
+        {roomName && (
+          <button aria-label={`Deselect ${roomName}`} className={TOOL} onClick={() => pickRoom(null)} type="button">
+            <X aria-hidden="true" className="h-3.5 w-3.5" />
+            <span className="max-w-40 truncate">Deselect {roomName}</span>
+          </button>
+        )}
+        <button aria-pressed={!labels} className={TOOL} onClick={toggleLabels} type="button">
+          <Tag aria-hidden="true" className="h-3.5 w-3.5" />
+          {labels ? 'Hide labels' : 'Show labels'}
+        </button>
+        <ThemeSwitch className="" />
+      </div>
     </>
   )
 }
+
+/** A button of the bottom-right toolbar, in the theme switch's look. */
+const TOOL = 'corner-smooth pointer-events-auto flex h-10 items-center gap-2 rounded-full border border-border/60 bg-background/95 px-4 font-medium text-foreground text-xs shadow-elevation-4 backdrop-blur-xl transition-colors hover:bg-background focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2'
 
 /**
  * Operates a model by Pascal's own rules, as a click on its viewer does. Not persisted: the scene
@@ -201,25 +262,47 @@ function operateModel(id: string) {
 const PICKABLE = new Set(['item', 'door', 'window'])
 
 /**
- * A click (not a drag) on the plan picks the item under it: the first item along the ray, seen
- * through the ghosted walls, floors and roofs in front of it. Nothing on hover. A click on no item
- * picks nothing.
+ * In the room picked in the explore panel, a click (not a drag) picks the piece of furniture under
+ * it: the first item along the ray, seen through the ghosted walls, floors and roofs in front of it,
+ * when it stands in that room. What can be picked is outlined under the pointer. With no room picked, or on
+ * furniture of another room, a click picks nothing.
  */
-function ItemPicker({ nodes, onPick }: { nodes: Record<string, { type?: string } | undefined>; onPick: (id: string | null) => void }) {
+function ItemPicker({ nodes, onPick, roomId, home, source }: {
+  nodes: Record<string, { type?: string } | undefined>
+  onPick: (id: string | null) => void
+  roomId: string | null
+  home: HomeLayer
+  source: ViewerSource
+}) {
   const { gl, camera, scene } = useThree()
-  const live = useRef({ nodes, onPick })
-  live.current = { nodes, onPick }
+  const showHover = useHoverOutline()
+  const live = useRef({ nodes, onPick, roomId, home, source })
+  live.current = { nodes, onPick, roomId, home, source }
   useEffect(() => {
     const el = gl.domElement
     const ray = new THREE.Raycaster()
     const at = new THREE.Vector2()
+    const box = new THREE.Box3()
+    const centre = new THREE.Vector3()
     let down: { x: number; y: number } | null = null
-    const onDown = (e: PointerEvent) => {
-      down = e.button === 0 ? { x: e.clientX, y: e.clientY } : null
+    let lastMove = 0
+    /** Whether an item stands in the picked room: by the linking's rooms, else by where it is drawn. */
+    const inRoom = (id: string) => {
+      const { roomId: room, home: h, source: s } = live.current
+      if (!room) return false
+      const thing = h.things.find((t) => t.id === id)
+      if (thing?.rooms.some((r) => r.id === room)) return true
+      const outline = roomOf(s, room)?.outline
+      const object = s.objectFor(id)
+      if (!outline || !object) return false
+      box.setFromObject(object)
+      if (box.isEmpty()) return false
+      box.getCenter(centre)
+      return insideOutline(outline, centre.x, centre.z)
     }
-    const onUp = (e: PointerEvent) => {
-      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return
-      down = null
+    /** The item of the picked room under the pointer, if any. */
+    const itemAt = (e: PointerEvent): string | null => {
+      if (!live.current.roomId) return null
       const r = el.getBoundingClientRect()
       at.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1)
       ray.setFromCamera(at, camera)
@@ -229,19 +312,69 @@ function ItemPicker({ nodes, onPick }: { nodes: Record<string, { type?: string }
         if (!hit.object.visible) continue
         for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) {
           const id = owner.get(o)
-          if (id && PICKABLE.has(live.current.nodes[id]?.type ?? '')) return live.current.onPick(id)
+          if (id && PICKABLE.has(live.current.nodes[id]?.type ?? '')) {
+            if (inRoom(id)) return id
+            break
+          }
         }
       }
-      live.current.onPick(null)
+      return null
     }
+    const onDown = (e: PointerEvent) => {
+      down = e.button === 0 ? { x: e.clientX, y: e.clientY } : null
+    }
+    const onUp = (e: PointerEvent) => {
+      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return
+      down = null
+      if (!live.current.roomId) return
+      live.current.onPick(itemAt(e))
+    }
+    const onMove = (e: PointerEvent) => {
+      if (!live.current.roomId) {
+        showHover(null)
+        return
+      }
+      if (e.buttons || e.timeStamp - lastMove < 50) return
+      lastMove = e.timeStamp
+      showHover(itemAt(e))
+    }
+    const onLeave = () => showHover(null)
     el.addEventListener('pointerdown', onDown)
     el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointermove', onMove)
+    el.addEventListener('pointerleave', onLeave)
     return () => {
       el.removeEventListener('pointerdown', onDown)
       el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('pointerleave', onLeave)
+      showHover(null)
     }
-  }, [gl, camera, scene])
+  }, [gl, camera, scene, showHover])
+  // a room let go takes its outline with it
+  useEffect(() => {
+    if (!roomId) showHover(null)
+  }, [roomId, showHover])
   return null
+}
+
+/**
+ * Outlines the piece of furniture under the pointer that can be linked, with Pascal's own hover
+ * outline (its outliner, as its selection manager fills it: this viewer runs a custom one), and
+ * shows the pointer over it.
+ */
+function useHoverOutline() {
+  const gl = useThree((s) => s.gl)
+  const hovered = useRef<string | null>(null)
+  return useCallback((id: string | null) => {
+    if (hovered.current === id) return
+    hovered.current = id
+    gl.domElement.style.cursor = id ? 'pointer' : ''
+    const { outliner } = useViewer.getState()
+    outliner.hoveredObjects.length = 0
+    const object = id ? sceneRegistry.nodes.get(id as AnyNodeId) : undefined
+    if (object) outliner.hoveredObjects.push(object)
+  }, [gl])
 }
 
 /** Development builds only: the three.js state on `window.__lab`, as in the lab. */

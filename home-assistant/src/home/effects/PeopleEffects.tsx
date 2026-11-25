@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { binaryColor, isOn, skyFor, tripped, type Area, type HassEntity, type HomeDevice } from '../entities'
-import { additiveSprite, approach, livePosition, useFlow } from './common'
+import { approach, livePosition, useFlow } from './common'
 import { flowLineMaterial, ringsMaterial } from './materials'
 import type { FamilyProps } from './SafetyEffects'
 
@@ -137,19 +137,6 @@ export function AlertEffect({ entity, device }: FamilyProps) {
       </mesh>
     </group>
   )
-}
-
-/** Family "status" (battery, running, plug, power, light, lock, update…): a steady glow on the
-    device while the condition holds. */
-export function StatusEffect({ entity, device }: FamilyProps) {
-  const glow = useMemo(() => additiveSprite(), [])
-  const k = useRef(0)
-  useFrame((_, dt) => {
-    k.current = approach(k.current, tripped(entity) ? 1 : 0, dt, 4)
-    glow.color.set(binaryColor(String(entity.attributes.device_class)))
-    glow.opacity = k.current * 0.85
-  })
-  return <sprite position={device.anchor.position} scale={0.55} material={glow} />
 }
 
 /* ---------------- remotes, infrared and radio senders ---------------- */

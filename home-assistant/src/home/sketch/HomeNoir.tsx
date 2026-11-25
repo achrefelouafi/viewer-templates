@@ -1,18 +1,21 @@
 import { sceneRegistry, useInteractive } from '@pascal-app/core'
-import { getSceneTheme, SCENE_LAYER, SITE_GROUND, useViewer } from '@pascal-app/viewer'
+import { BATCHED_LAYER, getSceneTheme, SCENE_LAYER, SITE_GROUND, useViewer } from '@pascal-app/viewer'
 import type { ViewerSource } from '@pascal-app/viewer/ui'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { mrt, output, positionLocal, vec4 } from 'three/tsl'
-import { LineBasicNodeMaterial, MeshStandardNodeMaterial, type Node, type NodeBuilder } from 'three/webgpu'
+import { LineBasicNodeMaterial, MeshStandardNodeMaterial, type Node, type NodeBuilder, type NodeMaterial, type WebGPURenderer } from 'three/webgpu'
+import { type DevelopRoom, developedMaterial, outsideRoom, roomInk, roomOf, setRoomOutline } from './roomInk'
 
 /**
  * The home as the guided tour draws it in the viewer-templates-tour project's `TourNoir`: a
  * wireframe the way the Pascal Noir editor draws it (ghosted walls and furniture with bright edges,
  * dark floors on a near-black ground; the paper version in light mode, following
- * `<html class="dark">`). Ported from there with two differences: there is no room in colour and
- * no circle spreading it; instead what Home Assistant drives keeps its own colours, always.
+ * `<html class="dark">`). Ported from there, and what Home Assistant drives keeps its own colours,
+ * always. The room the visitor picks (`room`) develops into colour as on the tour: a circle grows
+ * from its centre inside its outline (`roomInk.ts`), drawn by colour copies of the viewer's own
+ * materials while the wireframe steps aside there.
  *
  * Kept in colour: the graph nodes in `keep` (a door its lock opens), and everything drawn outside
  * the scene graph (the devices' bodies, their effects). Only meshes the graph owns are restyled.
@@ -26,6 +29,13 @@ import { LineBasicNodeMaterial, MeshStandardNodeMaterial, type Node, type NodeBu
 
 const EDGE_THRESHOLD_DEG = 35
 const RESCAN_INTERVAL_S = 0.5
+/** How long the picked room takes to develop into colour, and to go back, as on the tour. */
+const DEVELOP_S = 1.8
+const UNDEVELOP_S = 0.6
+const smooth = (x: number) => {
+  const t = Math.min(1, Math.max(0, x))
+  return t * t * (3 - 2 * t)
+}
 const NO_RAYCAST = () => {}
 
 type Palette = {
@@ -43,36 +53,36 @@ type Palette = {
   glassOpacity: number
 }
 
+/** The guided tour's X-ray (`pascal/src/tour/ink.ts` THEMES): frosted walls, pale ghosts for the
+    furniture, solid floors on the ground, ink edges strong on the walls and lighter on furniture. */
 const PALETTES: Record<'noir' | 'paper', Palette> = {
-  // Neutral black and greys, no blue cast.
   noir: {
-    bg: '#080808',
-    ground: '#0b0b0b',
-    wall: '#c2c2c2',
-    wallOpacity: 0.2,
-    edge: '#f2f2f2',
-    wallEdgeOpacity: 0.2,
-    item: '#c2c2c2',
+    bg: '#08090a',
+    ground: '#0c0d0f',
+    wall: '#b9c2cc',
+    wallOpacity: 0.1,
+    edge: '#f1f3f6',
+    wallEdgeOpacity: 0.6,
+    item: '#cfd4da',
     itemOpacity: 0.2,
-    itemEdgeOpacity: 0.2,
-    floor: '#2d2d2d',
-    glass: '#c2c2c2',
-    glassOpacity: 0.2,
+    itemEdgeOpacity: 0.45,
+    floor: '#131518',
+    glass: '#b9c2cc',
+    glassOpacity: 0.1,
   },
-  // Neutral whites and greys, no warm cast.
   paper: {
-    bg: '#f2f2f2',
-    ground: '#f2f2f2',
+    bg: '#f2f1ec',
+    ground: '#eae8e2',
     wall: '#ffffff',
-    wallOpacity: 0.2,
-    edge: '#2b2b2b',
-    wallEdgeOpacity: 0.2,
-    item: '#ffffff',
-    itemOpacity: 0.2,
-    itemEdgeOpacity: 0.2,
-    floor: '#e4e4e4',
+    wallOpacity: 0.22,
+    edge: '#2b2d31',
+    wallEdgeOpacity: 0.6,
+    item: '#f3f2ee',
+    itemOpacity: 0.42,
+    itemEdgeOpacity: 0.45,
+    floor: '#e3e1da',
     glass: '#ffffff',
-    glassOpacity: 0.2,
+    glassOpacity: 0.22,
   },
 }
 
@@ -668,6 +678,8 @@ function createKit(palette: Palette) {
   // light glows do), so the screen-space ink doesn't double the edges.
   for (const line of [wallEdge, itemEdge]) line.mrtNode = mrt({ output, diffuseColor: vec4(0), normal: vec4(0) })
   for (const material of [wall, item, floor, glass, ground, wallEdge, itemEdge, none]) material.userData.__tourNoir = true
+  // Inside the picked room the colour copies draw instead (nothing changes while no room is picked).
+  for (const material of [wall, item, floor, glass, wallEdge, itemEdge]) (material as unknown as NodeMaterial).maskNode = outsideRoom()
   // Moving twins of the surfaces and edges, one per motion and base material.
   const twins = new Map<string, { base: THREE.Material; twin: THREE.Material }>()
   const twin = (base: THREE.Material, motion: Motion): THREE.Material => {
@@ -680,6 +692,7 @@ function createKit(palette: Palette) {
     if (motion.position) made.positionNode = motion.position
     if (line) made.mrtNode = (base as LineBasicNodeMaterial).mrtNode
     copyLook(base, made)
+    ;(made as unknown as NodeMaterial).maskNode = (base as unknown as NodeMaterial).maskNode
     made.userData.__tourNoir = true
     twins.set(key, { base, twin: made })
     return made
@@ -757,8 +770,9 @@ function ownerKind(mesh: THREE.Object3D, owners: Map<THREE.Object3D, NodeOwner>)
 /**
  * @param keep the graph node ids Home Assistant drives: these stay in their own colours.
  * @param hide node kinds to leave out of the drawing altogether (the lab has no ceilings)
+ * @param room the zone the visitor picked: it develops into its own colours
  */
-export function HomeNoir({ source, keep, hide }: { source: ViewerSource; keep: ReadonlySet<string>; hide?: ReadonlySet<string> }) {
+export function HomeNoir({ source, keep, hide, room = null }: { source: ViewerSource; keep: ReadonlySet<string>; hide?: ReadonlySet<string>; room?: string | null }) {
   const { scene, invalidate, gl } = useThree()
   const dark = useDarkTheme()
   const palette = PALETTES[dark ? 'noir' : 'paper']
@@ -806,6 +820,7 @@ export function HomeNoir({ source, keep, hide }: { source: ViewerSource; keep: R
 
   useEffect(() => {
     kit.paint(palette)
+    roomInk.ink.value.set(palette.edge)
     invalidate()
   }, [kit, palette, invalidate])
 
@@ -958,8 +973,159 @@ export function HomeNoir({ source, keep, hide }: { source: ViewerSource; keep: R
 
   // Pick up meshes that arrive late (items loading, walls rebuilt). The surfaces stay on by
   // themselves (`pinMaterial`).
+  // The picked room in colour: a copy of each mesh in it wearing its own material, drawn only where
+  // the room has developed (`developedMaterial`), while the wireframe is masked out there.
+  const roomRef = useRef(room)
+  roomRef.current = room
+  const develop = useRef({
+    room: null as DevelopRoom | null,
+    progress: 0,
+    copies: new Map<THREE.Mesh, { copy: THREE.Mesh; source: THREE.Material | THREE.Material[] }>(),
+    materials: new Map<string, THREE.Material>(),
+  })
+  useEffect(() => invalidate(), [room, invalidate])
+
+  const colourOf = (material: THREE.Material) => {
+    const { materials } = develop.current
+    let made = materials.get(material.uuid)
+    if (!made) {
+      made = developedMaterial(material, gl as unknown as WebGPURenderer)
+      materials.set(material.uuid, made)
+    }
+    return made
+  }
+  const dress = (copy: THREE.Mesh, source: THREE.Material | THREE.Material[]) => {
+    copy.material = Array.isArray(source) ? source.map(colourOf) : colourOf(source)
+  }
+
+  /** Copies the meshes in the room that have none yet: those whose box reaches into it. */
+  const copyRoom = (r: DevelopRoom) => {
+    const { copies } = develop.current
+    const xs = r.outline.map((p) => p[0])
+    const zs = r.outline.map((p) => p[1])
+    const reach = new THREE.Box3(
+      new THREE.Vector3(Math.min(...xs) - 0.5, r.floorY - 0.2, Math.min(...zs) - 0.5),
+      new THREE.Vector3(Math.max(...xs) + 0.5, r.floorY + r.height + 0.3, Math.max(...zs) + 0.5),
+    )
+    const box = new THREE.Box3()
+    for (const [mesh, saved] of stash.current.meshes) {
+      if (copies.has(mesh) || saved.role === 'ground' || saved.role === 'none' || !mesh.parent) continue
+      if ((mesh as { isBatchedMesh?: boolean }).isBatchedMesh || (mesh as { isSkinnedMesh?: boolean }).isSkinnedMesh) continue
+      mesh.updateWorldMatrix(true, false)
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox()
+      const instanced = mesh as THREE.InstancedMesh
+      if (instanced.isInstancedMesh) {
+        if (!instanced.boundingBox) instanced.computeBoundingBox()
+        box.copy(instanced.boundingBox!)
+      } else if (mesh.geometry.boundingBox) box.copy(mesh.geometry.boundingBox)
+      else continue
+      if (!box.applyMatrix4(mesh.matrixWorld).intersectsBox(reach)) continue
+      let copy: THREE.Mesh
+      if (instanced.isInstancedMesh) {
+        const twin = new THREE.InstancedMesh(instanced.geometry, undefined, instanced.count)
+        twin.instanceMatrix = instanced.instanceMatrix
+        twin.instanceColor = instanced.instanceColor
+        twin.frustumCulled = false
+        copy = twin
+      } else {
+        copy = new THREE.Mesh(mesh.geometry)
+        copy.frustumCulled = mesh.frustumCulled
+      }
+      // a child with no transform of its own: it sits exactly on its mesh, instances and all
+      copy.raycast = NO_RAYCAST
+      copy.userData = { __tourNoir: true }
+      // A mesh Pascal draws through a batch (floors, items) sits on the batch layer only, which the
+      // camera never draws: its copy goes on the scene layer, or the room's floor would be a hole.
+      copy.layers.mask = mesh.layers.isEnabled(BATCHED_LAYER) ? (mesh.layers.mask | (1 << SCENE_LAYER)) & ~(1 << BATCHED_LAYER) : mesh.layers.mask
+      copy.renderOrder = mesh.renderOrder
+      copy.castShadow = false
+      copy.receiveShadow = saved.receiveShadow
+      dress(copy, saved.material)
+      mesh.add(copy)
+      copies.set(mesh, { copy, source: saved.material })
+    }
+  }
+
+  /** Keeps the copies on their meshes: new materials, rebuilt geometry, meshes let go. */
+  const keepCopies = () => {
+    const { copies } = develop.current
+    for (const [mesh, entry] of copies) {
+      const saved = stash.current.meshes.get(mesh)
+      if (!saved || !mesh.parent) {
+        entry.copy.removeFromParent()
+        copies.delete(mesh)
+        continue
+      }
+      if (entry.source !== saved.material) {
+        entry.source = saved.material
+        dress(entry.copy, saved.material)
+      }
+      if (entry.copy.geometry !== mesh.geometry) entry.copy.geometry = mesh.geometry
+      const instanced = mesh as THREE.InstancedMesh
+      if (instanced.isInstancedMesh) (entry.copy as THREE.InstancedMesh).count = instanced.count
+    }
+  }
+
+  const dropCopies = () => {
+    const { copies, materials } = develop.current
+    for (const { copy } of copies.values()) copy.removeFromParent()
+    copies.clear()
+    for (const material of materials.values()) material.dispose()
+    materials.clear()
+  }
+
+  /** The room's front: out of the last room first, then into the one picked. */
+  const stepRoom = (delta: number) => {
+    const d = develop.current
+    const wanted = roomRef.current
+    let busy = false
+    if (d.room && d.room.id !== wanted) {
+      d.progress = Math.max(0, d.progress - delta / UNDEVELOP_S)
+      busy = true
+      if (d.progress <= 0) {
+        dropCopies()
+        d.room = null
+      }
+    }
+    if (!d.room && wanted) {
+      const next = roomOf(liveSource.current, wanted)
+      if (next) {
+        d.room = next
+        d.progress = 0
+        setRoomOutline(next.outline)
+        copyRoom(next)
+        busy = true
+      }
+    }
+    if (d.room && d.room.id === wanted && d.progress < 1) {
+      d.progress = Math.min(1, d.progress + delta / DEVELOP_S)
+      busy = true
+    }
+    if (d.room) {
+      const p = smooth(d.progress)
+      roomInk.on.value = d.progress > 0 ? 1 : 0
+      roomInk.centre.value.set(...d.room.centre)
+      roomInk.floor.value.set(d.room.floorY - 0.12, d.room.floorY + d.room.height + 0.2)
+      roomInk.radius.value = p * d.room.reach
+      roomInk.glow.value = Math.sin(Math.PI * p) ** 0.6
+    } else {
+      roomInk.on.value = 0
+      roomInk.radius.value = 0
+    }
+    if (busy) invalidate()
+  }
+
+  // The copies go with the wireframe.
+  useEffect(() => () => {
+    dropCopies()
+    develop.current.room = null
+    roomInk.on.value = 0
+    // biome-ignore lint/correctness/useExhaustiveDependencies: unmount only
+  }, [])
+
   useFrame((_, delta) => {
     const state = stash.current
+    stepRoom(delta)
     for (const obj of state.hidden.keys()) obj.visible = false
     // Pascal attaches its culler again when batches are rebuilt: keep it off.
     if (pipeline && culling.current && pipeline.isCulled !== culling.current.own) {
@@ -970,6 +1136,8 @@ export function HomeNoir({ source, keep, hide }: { source: ViewerSource; keep: R
     if (state.elapsed >= RESCAN_INTERVAL_S) {
       state.elapsed = 0
       scan()
+      keepCopies()
+      if (develop.current.room) copyRoom(develop.current.room)
       return
     }
     // A door or window in motion is rebuilt as new meshes every frame: restyle it every frame, or

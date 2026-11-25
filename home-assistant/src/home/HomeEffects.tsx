@@ -11,7 +11,7 @@ import { RotorEffect } from './effects/RotorEffect'
 import { AlarmEffect, ContactEffect, LeakEffect, LockEffect, ModelOpening, MotionEffect, OpeningEffect, SirenEffect, SmokeEffect } from './effects/SafetyEffects'
 import { EnergyEffect, HeaterEffect, RobotEffect, WaterEffect } from './effects/UtilityEffects'
 import { livePosition } from './effects/common'
-import { AlertEffect, DoorbellEffect, MistEffect, PresenceEffect, SignalEffect, StatusEffect, WeatherEffect } from './effects/PeopleEffects'
+import { AlertEffect, DoorbellEffect, MistEffect, PresenceEffect, SignalEffect, WeatherEffect } from './effects/PeopleEffects'
 
 /** Where rain and snow fall: round the home, a few metres past its rooms. */
 function weatherBounds(areas: Area[]): [number, number, number, number] {
@@ -104,7 +104,8 @@ export function HomeEffects({ devices, areas, indoor = areas, entities, layer, f
           case 'mist': return <MistEffect {...p} />
           case 'presence': return <PresenceEffect {...p} areas={areas} devices={devices} />
           case 'alert': return <AlertEffect {...p} />
-          case 'status': return <StatusEffect {...p} />
+          // a status (battery, running, lock…) draws nothing on the plan: its pin says it
+          case 'status': return null
           case 'signal': return <SignalEffect {...p} devices={devices} />
           case 'doorbell': return <DoorbellEffect {...p} />
           default: return null

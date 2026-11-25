@@ -1,12 +1,12 @@
 import { usePascalI18n } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
 import type { ViewerSource } from '@pascal-app/viewer/ui'
 import { useId, useMemo } from 'react'
 import { buildLevelPlan } from './planGeometry'
+import { useRoomHover } from './roomHover'
 
 /**
  * Interactive SVG mini floor plan drawn from the current level's real zone polygons.
- * Synced with the room list and 3D scene through `hoveredId`: a room is lit only while hovered,
+ * Synced with the room list and the rooms' labels in 3D through `useRoomHover`: a room is lit only while hovered,
  * and a click frames it without selecting it,
  * and animates its room outlines drawing in when switching floors.
  */
@@ -24,7 +24,7 @@ export function MiniPlan({
   onLeaveRoom: (zoneId: string) => void
 }) {
   const i18n = usePascalI18n()
-  const hoveredId = useViewer((s) => s.hoveredId)
+  const hoveredId = useRoomHover((s) => s.id)
   const glowId = useId().replaceAll(':', '')
 
   const plan = useMemo(
