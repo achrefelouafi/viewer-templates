@@ -768,7 +768,8 @@ export function HomePanel({ title, owner = null, devices, areas, entities, selec
       )}
 
       {/* the device list, by room */}
-      <aside aria-label="Devices" className="pointer-events-auto absolute top-4 left-4 flex max-h-[calc(100%-2rem)] w-72 flex-col overflow-hidden rounded-2xl border border-border/60 bg-background/90 shadow-lg backdrop-blur">
+      {/* ends above the Home Assistant pill at the bottom left (bottom-4, about 3rem tall) */}
+      <aside aria-label="Devices" className="pointer-events-auto absolute top-4 left-4 flex max-h-[calc(100%-6rem)] w-72 flex-col overflow-hidden rounded-2xl border border-border/60 bg-background/90 shadow-lg backdrop-blur">
         <header className="grid gap-1 border-border/60 border-b px-4 py-3">
           <b className="font-semibold leading-snug">{title}</b>
           {owner && <span className="truncate font-mono text-[10px] text-muted-foreground">By {owner}</span>}

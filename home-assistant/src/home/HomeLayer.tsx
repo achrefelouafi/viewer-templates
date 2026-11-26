@@ -1,5 +1,5 @@
 import { useViewer } from '@pascal-app/viewer'
-import { Button, type ViewerSource } from '@pascal-app/viewer/ui'
+import { Button, Popover, PopoverContent, PopoverTrigger, type ViewerSource } from '@pascal-app/viewer/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { type Area, domainOf, type FieldKind, type HomeDevice } from './entities'
@@ -301,7 +301,7 @@ function ConnectCard({ home }: { home: HomeLayer }) {
         <i className="size-2 rounded-full bg-[#3ddc97]" />
         <span className="text-muted-foreground">Home Assistant</span>
         <b className="font-medium">{linked} linked</b>
-        <Button className="rounded-full" onClick={disconnect} size="sm" variant="ghost">Disconnect</Button>
+        <DisconnectButton onDisconnect={disconnect} />
       </div>
     )
   }
@@ -335,6 +335,45 @@ function ConnectCard({ home }: { home: HomeLayer }) {
           </div>
         </form>
     </div>
+  )
+}
+
+/**
+ * Disconnect, after a check: a mis-click would mean signing in to Home Assistant again. The links
+ * stay saved in this browser (`storage.ts`, per project and Home Assistant) and come back then.
+ */
+function DisconnectButton({ onDisconnect }: { onDisconnect: () => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover onOpenChange={setOpen} open={open}>
+      <PopoverTrigger asChild>
+        <Button className="rounded-full" size="sm" variant="ghost">Disconnect</Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 rounded-2xl border-border/60 bg-background/95 p-4 text-sm shadow-lg backdrop-blur" side="top" sideOffset={10}>
+        <div className="grid gap-3">
+          <div className="grid gap-1">
+            <b className="font-medium">Disconnect Home Assistant?</b>
+            <span className="text-muted-foreground text-xs leading-relaxed">
+              Your devices stop updating here, and you'll have to sign in to Home Assistant again. Your links stay saved in this browser and come back when you do.
+            </span>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button className="rounded-full" onClick={() => setOpen(false)} size="sm" variant="ghost">Cancel</Button>
+            <Button
+              className="rounded-full"
+              onClick={() => {
+                setOpen(false)
+                onDisconnect()
+              }}
+              size="sm"
+              variant="destructive"
+            >
+              Disconnect
+            </Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
 

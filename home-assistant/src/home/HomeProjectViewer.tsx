@@ -94,7 +94,8 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
   useUiSounds()
   const pins = useRef<Record<string, HTMLElement | null>>({})
   const [selected, setSelected] = useState<string | null>(null)
-  const [layer, setLayer] = useState<FieldKind | null>('temperature')
+  // the floor shows nothing until the visitor picks a reading (or opens a sensor's card)
+  const [layer, setLayer] = useState<FieldKind | null>(null)
   const view = useMemo(() => viewOf(home.areas), [home.areas])
   // a floor picked from the list reads as on the default viewer: the floors above step aside
   useViewerFloorDisplay()
