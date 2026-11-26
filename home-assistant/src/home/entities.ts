@@ -1,6 +1,6 @@
 /* Devices as Home Assistant describes them. Entity state, attributes and service calls follow
-   Home Assistant's own shapes (the ones home-assistant-js-websocket hands out), so the lab's
-   simulator and, later, a real Home Assistant connection drive the same effects and cards. */
+   Home Assistant's own shapes (the ones home-assistant-js-websocket hands out), as a real
+   Home Assistant connection gives them to the effects and cards. */
 
 export type V3 = [number, number, number]
 

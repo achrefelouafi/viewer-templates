@@ -1,6 +1,6 @@
 import type { V3 } from '../../src/home/entities'
 import type { GraphNode, GraphNodes } from '../../src/home/link/scene'
-import { AREAS, FRONT_DOOR_ID, LAB_AREA_OF, LAB_DEVICES, LAB_GRAPH } from '../../src/lab/labHome'
+import { AREAS, FRONT_DOOR_ID, LAB_AREA_OF, LAB_DEVICES, LAB_GRAPH } from './labHome'
 
 /* The lab's home as a real Pascal project would have it: its devices drawn as catalog items (the
    lab draws them by hand instead), with furniture around them that is not a device, and two

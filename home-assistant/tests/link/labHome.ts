@@ -1,13 +1,12 @@
-import type { SceneGraph } from '../pascal/contract'
-import type { Area, HassEntities, HomeDevice, V3 } from '../home/entities'
-import type { AreaAir } from '../home/simulator'
+import type { SceneGraph } from '../../src/pascal/contract'
+import type { Area, HassEntities, HomeDevice, V3 } from '../../src/home/entities'
 import frontDoor from './frontDoor.json' with { type: 'json' }
 
-/* The effects lab's test home: three rooms and a garden built as a Pascal graph, every device family
-   placed by hand, and their entities as Home Assistant would report them. Once effects attach to a
-   real project, devices come from its items instead. */
+/* The link tests' sample home (once the /lab route's): three rooms and a garden built as a Pascal
+   graph, every device family placed by hand, and their entities as Home Assistant would report them. */
 
-/** The slab's walking surface: Pascal's default slab elevation. */
+/** The lab's sample home, kept as the link tests' fixture (the /lab route is gone).
+ * The slab's walking surface: Pascal's default slab elevation. */
 export const FLOOR_Y = 0.05
 /** The garden's ground, just above the site's own. */
 const GROUND_Y = 0.012
@@ -190,11 +189,6 @@ export const LAB_AREA_OF: Record<string, string> = Object.fromEntries(LAB_DEVICE
 /** Lab-only scenery that is not a device: the electrical panel the plug's cable runs from. */
 export const LAB_SCENERY: { model: 'panel'; position: V3; rotationY: number }[] = [{ model: 'panel', position: [9.9, 1.4, -1.6], rotationY: NX }]
 
-export const LAB_AIR: Record<string, AreaAir> = {
-  lounge: { temperature: 25.4, humidity: 61, carbon_dioxide: 980, pm25: 16, volatile_organic_compounds: 420, illuminance: 300, sound_pressure: 45 },
-  studio: { temperature: 24.6, humidity: 55, carbon_dioxide: 1480, pm25: 12, volatile_organic_compounds: 640, illuminance: 300, sound_pressure: 35 },
-  utility: { temperature: 23.2, humidity: 64, carbon_dioxide: 700, pm25: 10, volatile_organic_compounds: 300, illuminance: 120, sound_pressure: 30 },
-}
 
 const sensor = (id: string, name: string, device_class: string, unit: string, state: number, extra: Record<string, unknown> = {}) => ({
   entity_id: id, state: String(state), attributes: { friendly_name: name, device_class, unit_of_measurement: unit, state_class: 'measurement', ...extra },

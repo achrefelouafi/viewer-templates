@@ -4,7 +4,7 @@ import { entityInfos, linkHome, pairAreas } from '../../src/home/link/match'
 import { formatReport } from '../../src/home/link/report'
 import { readThings } from '../../src/home/link/scene'
 import { roomLikeness } from '../../src/home/link/words'
-import { LAB_ENTITIES } from '../../src/lab/labHome'
+import { LAB_ENTITIES } from './labHome'
 import { EXTRA_ENTITIES, labPlan } from './labPlan'
 
 /* Linking Home Assistant to a Pascal plan, scored on the lab's home drawn as catalog items. No

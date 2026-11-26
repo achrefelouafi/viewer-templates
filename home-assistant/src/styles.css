@@ -500,3 +500,12 @@ html.dark[data-ui-style="glass"] :is(.backdrop-blur, .backdrop-blur-xl, .backdro
   background-color: color-mix(in srgb, var(--foreground) 9%, transparent) !important;
   border-color: rgb(255 255 255 / 0.16) !important;
 }
+/* Text in dark glass is white: the plan behind can be as bright as a white floor, where the theme's
+   grey would vanish. Secondary text stays a little dimmer, and a faint shadow keeps both legible. */
+html.dark[data-ui-style="glass"] :is(.backdrop-blur, .backdrop-blur-xl, .backdrop-blur-md)[class*="bg-background"]:not(.inset-0),
+html.dark[data-ui-style="glass"] :is(.ui-glass, .tour-glass) {
+  --foreground: #ffffff;
+  --muted-foreground: rgb(255 255 255 / 0.74);
+  color: var(--foreground);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.45);
+}

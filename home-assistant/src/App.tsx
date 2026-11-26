@@ -5,15 +5,11 @@ import { projectSceneRuntime } from './runtime/project-scene'
 import { useProjectScene } from './useProjectScene'
 import { ErrorScreen, LoadingScreen, NeedsAccessScreen, NoFileScreen, RefusedScreen, Status } from './viewer/screens'
 
-/** The Home Assistant effects lab, at /lab (or ?lab where the host has no rewrites). Loaded on demand. */
-const Lab = lazy(() => import('./lab/Lab'))
-/** A project as the lab shows its home, with the visitor's own Home Assistant. */
+/** A project with the visitor's own Home Assistant. */
 const HomeProjectViewer = lazy(() => import('./home/HomeProjectViewer').then((m) => ({ default: m.HomeProjectViewer })))
-const isLabRoute = () => /\/lab\/?$/.test(window.location.pathname) || new URLSearchParams(window.location.search).has('lab')
 
 export function App() {
   const projectId = useMemo(() => projectIdFromLocation(), [])
-  if (isLabRoute()) return <Suspense fallback={<LoadingScreen />}><Lab /></Suspense>
   if (!projectId && !hasHandoffCallback()) return <Status state="missing-project" title="No project selected">
     <p>Add <code>?project=&lt;id&gt;</code> to the address, or set <code>VITE_PASCAL_PROJECT_ID</code>.</p>
   </Status>
