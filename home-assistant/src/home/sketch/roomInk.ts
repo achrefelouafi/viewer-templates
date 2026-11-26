@@ -1,40 +1,41 @@
 import type { ViewerSource } from '@pascal-app/viewer/ui'
-import { Color, type Material, Matrix4, Vector2, Vector3, Vector4 } from 'three'
-import { bool, Break, clamp, dot, exp, float, Fn, If, int, length, Loop, max, mix, output, positionWorld, select, smoothstep, step, uniform, uniformArray, vec2, vec4 } from 'three/tsl'
+import { type Material, Matrix4, Vector2, Vector3, Vector4 } from 'three'
+import { bool, Break, clamp, dot, float, Fn, fract, If, int, length, Loop, max, positionWorld, screenCoordinate, select, smoothstep, step, uniform, uniformArray, vec2 } from 'three/tsl'
 import { MeshStandardNodeMaterial, type NodeMaterial, type WebGPURenderer } from 'three/webgpu'
 
 /**
- * The guided tour's room in colour (`pascal/src/tour/ink.ts`), for the Home Assistant wireframe:
- * the room the visitor picked develops back into the viewer's own materials, a circle growing from
- * its centre inside its outline, with a thin line of ink at the moving front. Only the room part of
- * the tour's develop is here: the rest of the house stays in the wireframe.
+ * The home in colour, for the Home Assistant wireframe: the furniture and floors draw in the
+ * viewer's own materials (walls and the ground stay in the wireframe). When the visitor picks a
+ * room, every other room fades back to the wireframe, a dissolve over the screen, and comes back
+ * when the room is let go.
  *
- * The wireframe's materials draw outside the developed part (`outsideRoom`), the colour copies
- * (`developedMaterial`) inside it; one write to `roomInk` per frame moves both.
+ * How coloured a point is: `rest` everywhere, raised to each slot's `weight` inside its room. Two
+ * slots, so the room let go fades out while the one picked fades in. The wireframe's materials draw
+ * where the point is not coloured (`notColoured`), the colour copies (`colourMaterial`) where it is,
+ * one dither threshold per pixel deciding between them.
  */
 
 /** Room outlines with more corners than this fall back to their bounding box. */
 export const MAX_OUTLINE = 32
 
-/** Where colour has come in: the colour copy draws here, the wireframe everywhere else. */
-const SEAM = 0.5
-
-export const roomInk = {
-  on: uniform(0),
+/** A room the fade colours: its outline, its floor and ceiling heights in the world, its weight. */
+const slot = () => ({
   // vec4s: arrays of vec2 pad differently between the WebGPU and WebGL2 backends.
   outline: uniformArray(Array.from({ length: MAX_OUTLINE }, () => new Vector4()), 'vec4'),
   corners: uniform(0),
-  /** The room's floor and ceiling heights in the world. */
   floor: uniform(new Vector2(-1e4, 1e4)),
-  centre: uniform(new Vector2()),
-  radius: uniform(0),
-  glow: uniform(0),
-  /** The front's line, in the wireframe's edge colour. */
-  ink: uniform(new Color('#2b2b2b')),
+  weight: uniform(0),
+})
+type Slot = ReturnType<typeof slot>
+
+export const roomInk = {
+  /** How coloured the home is outside the picked rooms: 1 with no room picked, 0 with one. */
+  rest: uniform(1),
+  slots: [slot(), slot()] as const,
 }
 
-/** Room outline in world x/z, closed, at most `MAX_OUTLINE` corners (else its bounding box). */
-export function setRoomOutline(points: readonly [number, number][]) {
+/** A room's outline in world x/z into a slot: closed, at most `MAX_OUTLINE` corners (else its bounding box). */
+export function setRoomOutline(index: 0 | 1, points: readonly [number, number][], floorY: number, height: number) {
   let shape = points
   if (shape.length > MAX_OUTLINE) {
     const xs = points.map((p) => p[0])
@@ -42,9 +43,20 @@ export function setRoomOutline(points: readonly [number, number][]) {
     const [x0, x1, z0, z1] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)]
     shape = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]]
   }
-  const array = roomInk.outline.array as Vector4[]
+  const target = roomInk.slots[index]
+  const array = target.outline.array as Vector4[]
   shape.forEach(([x, z], i) => array[i]!.set(x, z, 0, 0))
-  roomInk.corners.value = shape.length
+  target.corners.value = shape.length
+  target.floor.value.set(floorY - 0.12, floorY + height + 0.2)
+}
+
+/** Copies slot 0 into slot 1: the room let go keeps fading out there. */
+export function shiftRoomSlot() {
+  const [a, b] = roomInk.slots
+  ;(b.outline.array as Vector4[]).forEach((v, i) => v.copy((a.outline.array as Vector4[])[i]!))
+  b.corners.value = a.corners.value
+  b.floor.value.copy(a.floor.value)
+  b.weight.value = a.weight.value
 }
 
 /**
@@ -54,9 +66,9 @@ export function setRoomOutline(points: readonly [number, number][]) {
 // biome-ignore lint/suspicious/noExplicitAny: see above
 type N = any
 
-/** Signed distance to the room outline, positive inside. */
-const roomDistance: (p: N) => N = Fn(([p]: [N]) => {
-  const corners: N = int(roomInk.corners)
+/** Signed distance to a slot's outline, positive inside. */
+const roomDistance = (s: Slot): ((p: N) => N) => Fn(([p]: [N]) => {
+  const corners: N = int(s.corners)
   const inside = float(0).toVar()
   const d = float(1e4).toVar()
   Loop({ start: int(0), end: int(MAX_OUTLINE), type: 'int', condition: '<' }, ({ i }: { i: N }) => {
@@ -64,8 +76,8 @@ const roomDistance: (p: N) => N = Fn(([p]: [N]) => {
       Break()
     })
     const j: N = select(i.equal(0), corners.sub(1), i.sub(1))
-    const a: N = (roomInk.outline.element(i) as N).xy.toVar()
-    const b: N = (roomInk.outline.element(j) as N).xy.toVar()
+    const a: N = ((s.outline as N).element(i) as N).xy.toVar()
+    const b: N = ((s.outline as N).element(j) as N).xy.toVar()
     const crosses = a.y.greaterThan(p.y).notEqual(b.y.greaterThan(p.y))
     const at = b.x.sub(a.x).mul(p.y.sub(a.y)).div(b.y.sub(a.y)).add(a.x)
     If(crosses.and(p.x.lessThan(at)), () => {
@@ -79,23 +91,32 @@ const roomDistance: (p: N) => N = Fn(([p]: [N]) => {
   return select(corners.lessThan(3), float(-1e4), select(inside.greaterThan(0.5), d, d.negate()))
 }) as N
 
-const square = (x: N): N => x.mul(x)
+const distances = roomInk.slots.map(roomDistance)
 
-/** x: how developed this point is (0 wireframe, 1 colour). y: the glow of the moving front. */
-const develop: (w: N) => N = Fn(([w]: [N]) => {
-  // Inside the outline up to its walls' inner faces, never the far side of a wall (a wall is at
-  // least 6 cm thick), on its floor, inside its front.
-  const inRoom: N = smoothstep(-0.06, 0, roomDistance(w.xz))
-    .mul(step(roomInk.floor.x, w.y)).mul(step(w.y, roomInk.floor.y)).mul(roomInk.on)
-  const dr: N = length(w.xz.sub(roomInk.centre))
-  const room = inRoom.mul(float(1).sub(smoothstep(roomInk.radius.sub(0.9), roomInk.radius, dr)))
-  const ring = inRoom.mul(exp(square(dr.sub(roomInk.radius).add(0.45).div(0.06)).negate())).mul(roomInk.glow).mul(0.7)
-  return vec2(room, clamp(ring, 0, 1))
+/** How far a slot's room claims this point: inside its outline up to its walls' inner faces, on its floor. */
+const inSlot = (index: 0 | 1, w: N): N => {
+  const s = roomInk.slots[index]
+  return smoothstep(-0.06, 0, distances[index]!(w.xz)).mul(step((s.floor as N).x, w.y)).mul(step(w.y, (s.floor as N).y))
+}
+
+/** How coloured this point is, 0 wireframe to 1 colour. */
+const colourAt: (w: N) => N = Fn(([w]: [N]) => {
+  const a: N = inSlot(0, w).mul(roomInk.slots[0].weight)
+  const b: N = inSlot(1, w).mul(roomInk.slots[1].weight)
+  return max(roomInk.rest, max(a, b))
 }) as N
 
-/** The wireframe's mask: true where the room has not developed. */
-export function outsideRoom(): N {
-  return (develop(positionWorld) as N).x.lessThan(SEAM)
+/** One threshold per pixel (interleaved gradient noise): the fade is a dissolve, never a blend. */
+const dither = (): N => fract(float(52.9829189).mul(fract(dot(screenCoordinate.xy, vec2(0.06711056, 0.00583715)))))
+
+/** The wireframe's mask: true where this point is not in colour. */
+export function notColoured(): N {
+  return (colourAt(positionWorld) as N).lessThanEqual(dither())
+}
+
+/** The colour copies' mask: exactly where the wireframe's is not. */
+function coloured(): N {
+  return (colourAt(positionWorld) as N).greaterThan(dither())
 }
 
 /** Fields three's renderer manages per material, never copied. */
@@ -119,17 +140,13 @@ function nodeCopy(source: Material, renderer: WebGPURenderer | null): NodeMateri
 }
 
 /**
- * The viewer's material as it is, drawn only where the room has developed: everything of the
- * original (transparency, depth, sides, MRT), so the room is the viewer's own render; the moving
- * front adds a thin line of ink.
+ * The viewer's material as it is, drawn only where the home is in colour: everything of the
+ * original (transparency, depth, sides, MRT), so it is the viewer's own render.
  */
-export function developedMaterial(source: Material, renderer: WebGPURenderer | null): NodeMaterial {
+export function colourMaterial(source: Material, renderer: WebGPURenderer | null): NodeMaterial {
   const material = nodeCopy(source, renderer)
-  const base: N = material.outputNode ?? output
-  const d: N = develop(positionWorld)
-  material.outputNode = vec4(mix(base.rgb, roomInk.ink, d.y.mul(0.65)), base.a)
   const own = (source as NodeMaterial).maskNode as N
-  const seam: N = d.x.greaterThanEqual(SEAM)
+  const seam: N = coloured()
   material.maskNode = own ? bool(own).and(seam) : seam
   material.userData = { ...material.userData, __tourNoir: true }
   material.needsUpdate = true
@@ -143,8 +160,6 @@ export type DevelopRoom = {
   levelId: string | null
   outline: [number, number][]
   centre: [number, number]
-  /** Distance from the centre to the farthest corner, plus a margin: how far its front grows. */
-  reach: number
   floorY: number
   height: number
 }
@@ -183,7 +198,6 @@ export function roomOf(source: ViewerSource, zoneId: string): DevelopRoom | null
     levelId,
     outline,
     centre,
-    reach: Math.max(...outline.map(([x, z]) => Math.hypot(x - centre[0], z - centre[1]))) + 0.6,
     floorY,
     height: num(zone.ceilingHeight, num(levelId ? nodes[levelId]?.height : undefined, 2.7)),
   }
