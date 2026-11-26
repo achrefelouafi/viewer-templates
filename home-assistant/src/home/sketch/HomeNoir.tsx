@@ -51,6 +51,7 @@ type Palette = {
   itemOpacity: number
   itemEdgeOpacity: number
   floor: string
+  floorOpacity: number
   glass: string
   glassOpacity: number
 }
@@ -69,7 +70,9 @@ const PALETTES: Record<'noir' | 'paper', Palette> = {
     item: '#cfd4da',
     itemOpacity: 0.2,
     itemEdgeOpacity: 0.45,
-    floor: '#131518',
+    // floors frosted like the walls, not a dark slab: the room faded out reads as glass
+    floor: '#b9c2cc',
+    floorOpacity: 0.1,
     glass: '#b9c2cc',
     glassOpacity: 0.1,
   },
@@ -84,7 +87,8 @@ const PALETTES: Record<'noir' | 'paper', Palette> = {
     item: '#f3f2ee',
     itemOpacity: 0.42,
     itemEdgeOpacity: 0.45,
-    floor: '#e3e1da',
+    floor: '#ffffff',
+    floorOpacity: 0.22,
     glass: '#ffffff',
     glassOpacity: 0.22,
   },
@@ -662,8 +666,11 @@ function createKit(palette: Palette) {
   })
   const floor = new MeshStandardNodeMaterial({
     color: palette.floor,
-    roughness: 0.95,
+    roughness: 0.6,
     metalness: 0,
+    transparent: true,
+    opacity: palette.floorOpacity,
+    depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
@@ -753,6 +760,7 @@ function createKit(palette: Palette) {
       item.color.set(next.item)
       item.opacity = next.itemOpacity
       floor.color.set(next.floor)
+      floor.opacity = next.floorOpacity
       copyLook(item, solid.item)
       copyLook(floor, solid.floor)
       solid.item.visible = solid.floor.visible = true
