@@ -8,14 +8,8 @@ import { useRoomHover } from './roomHover'
 
 /** How high over its floor a room's dot sits, in metres. */
 const DOT_Y = 0.05
-/** How tall the walls are taken to be when finding the plan's top on screen, in metres. */
-const WALL_Y = 2.7
-/** Room between the plan's top and the labels' row, between two labels, and from the screen's edges, in pixels. */
-const LIFT = 36
-const GAP = 8
-const EDGE = 12
-/** The labels' row never goes higher than this, under the header, in pixels. */
-const TOP_MIN = 72
+/** How high over its floor a room's label stands, above the walls, in metres. */
+const LABEL_Y = 3.6
 
 type ZoneNode = { id: string; type: string; name?: string; parentId?: string | null; polygon?: [number, number][] | { points?: [number, number][] } }
 type Room = { id: string; name: string; centre: [number, number]; polygon: [number, number][] }
@@ -47,10 +41,10 @@ function hide(...elements: (HTMLElement | SVGElement | undefined)[]) {
 const TOP_LEFT = (): [number, number] => [0, 0]
 
 /**
- * Inside the viewer's canvas: the name of each room of the floor shown, in a row above the plan so
- * it never hides it, with a straight vertical line down to a dot in the middle of its room. A label
- * that would overlap another goes up a row instead of aside, so every line stays vertical. A label picks its room as
- * the explore panel's list does, and lights up while it or the room's row in the panel is pointed
+ * Inside the viewer's canvas: the name of each room of the floor shown, standing in 3D over the
+ * middle of its room, above the walls, on a stick that rises straight up from a dot on its floor. As
+ * the camera turns, label and stick stay where they are in the room, so the stick is vertical in
+ * the world, not on the screen. A label picks its room as the explore panel's list does, and lights up while it or the room's row in the panel is pointed
  * at (`useRoomHover`).
  */
 export function RoomLabels({ source, roomId, onPick }: { source: ViewerSource; roomId: string | null; onPick: (zoneId: string) => void }) {
@@ -79,60 +73,32 @@ export function RoomLabels({ source, roomId, onPick }: { source: ViewerSource; r
       v.set(x, y, z).applyMatrix4(level.matrixWorld).project(camera)
       return { x: ((v.x + 1) / 2) * width, y: ((1 - v.y) / 2) * height, front: v.z < 1 }
     }
-    // the plan's top on screen: the highest of its rooms' corners at the top of their walls
-    let top = Number.POSITIVE_INFINITY
-    for (const room of rooms) for (const [x, z] of room.polygon) top = Math.min(top, toScreen(x, WALL_Y, z).y)
     // a room whose middle is off the screen (behind the camera, or zoomed past) has no label
     const onScreen = (d: { x: number; y: number; front: boolean }) => d.front && d.x >= 0 && d.x <= width && d.y >= 0 && d.y <= height
-    const laid = rooms.flatMap((room) => {
+    for (const room of rooms) {
       const pill = pills.current.get(room.id)
-      if (!pill) return []
-      const dot = toScreen(room.centre[0], DOT_Y, room.centre[1])
-      if (!onScreen(dot)) {
-        hide(pill, lines.current.get(room.id), dots.current.get(room.id))
-        return []
+      const line = lines.current.get(room.id)
+      const dot = dots.current.get(room.id)
+      if (!pill) continue
+      const foot = toScreen(room.centre[0], DOT_Y, room.centre[1])
+      const head = toScreen(room.centre[0], LABEL_Y, room.centre[1])
+      if (!onScreen(foot) || !head.front) {
+        hide(pill, line, dot)
+        continue
       }
-      return [{ room, pill, dot, width: pill.offsetWidth, height: pill.offsetHeight, x: dot.x, y: 0 }]
-    })
-    if (!laid.length) return
-    const pillHeight = Math.max(...laid.map((l) => l.height))
-    // Each label straight above its dot (kept inside the screen), in the lowest row where it overlaps
-    // no other; the first row just above the plan, the others above it.
-    laid.sort((a, b) => a.dot.x - b.dot.x)
-    const ends: number[] = []
-    const row = laid.map((l) => {
-      // a pill may slide aside as long as its line still meets it, a little in from its end
-      const slide = Math.max(0, l.width / 2 - 14)
-      const inside = (x: number) => Math.min(Math.max(x, EDGE + l.width / 2), width - EDGE - l.width / 2)
-      const lo = inside(l.dot.x - slide)
-      const hi = inside(l.dot.x + slide)
-      let r = ends.findIndex((end) => end + GAP + l.width / 2 <= hi)
-      if (r < 0) r = ends.length
-      const free = r < ends.length ? ends[r]! + GAP + l.width / 2 : lo
-      l.x = Math.min(hi, Math.max(lo, inside(l.dot.x), free))
-      ends[r] = l.x + l.width / 2
-      return r
-    })
-    const step = pillHeight + GAP
-    const lowest = Math.max(TOP_MIN + (ends.length - 1) * step, top - LIFT - pillHeight)
-    laid.forEach((l, i) => {
-      l.y = lowest - row[i]! * step
-    })
-    for (const l of laid) {
-      l.pill.style.transform = `translate(${l.x - l.width / 2}px, ${l.y}px)`
-      l.pill.style.visibility = 'visible'
-      const line = lines.current.get(l.room.id)
-      const dot = dots.current.get(l.room.id)
+      // the label's bottom middle on the stick's top
+      pill.style.transform = `translate(${head.x - pill.offsetWidth / 2}px, ${head.y - pill.offsetHeight}px)`
+      pill.style.visibility = 'visible'
       if (line) {
-        line.setAttribute('x1', String(l.dot.x))
-        line.setAttribute('y1', String(l.y + l.height))
-        line.setAttribute('x2', String(l.dot.x))
-        line.setAttribute('y2', String(l.dot.y))
+        line.setAttribute('x1', String(head.x))
+        line.setAttribute('y1', String(head.y))
+        line.setAttribute('x2', String(foot.x))
+        line.setAttribute('y2', String(foot.y))
         line.style.visibility = 'visible'
       }
       if (dot) {
-        dot.setAttribute('cx', String(l.dot.x))
-        dot.setAttribute('cy', String(l.dot.y))
+        dot.setAttribute('cx', String(foot.x))
+        dot.setAttribute('cy', String(foot.y))
         dot.style.visibility = 'visible'
       }
     }

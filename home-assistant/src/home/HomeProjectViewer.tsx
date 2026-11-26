@@ -16,7 +16,7 @@ import { RoomLabels } from './explore/RoomLabels'
 import { useIsCompact } from './explore/useIsCompact'
 import { insideOutline, roomOf } from './sketch/roomInk'
 import { readStore, updateStore } from './storage'
-import { ThemeSwitch } from './sketch/ThemeSwitch'
+import { SettingsMenu } from './sketch/SettingsMenu'
 
 /* A Pascal project as the effects lab shows its home (src/lab/Lab.tsx), with the visitor's own
    Home Assistant in place of the lab's simulated one: the guided tour's wireframe in light or dark,
@@ -222,7 +222,7 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
         onOpenChange={setExploreOpen} onRoomSelect={pickRoom} open={exploreOpen} ownerName={ownerName} projectName={title} selectedRoomId={roomId} source={source} />
 
       {/* bottom right (over the Home Assistant pill on a phone): let the picked room go (not everyone knows Escape, and a tablet has none),
-          the rooms' labels on or off, and light or dark */}
+          the rooms' labels on or off, and the settings (light or dark, solid or glass) */}
       <div className="pointer-events-none absolute right-4 bottom-[4.75rem] z-30 flex flex-wrap items-center justify-end gap-2 sm:right-6 sm:bottom-6">
         {roomName && (
           <button aria-label={`Deselect ${roomName}`} className={TOOL} onClick={() => pickRoom(null)} type="button">
@@ -234,7 +234,7 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
           <Tag aria-hidden="true" className="h-3.5 w-3.5" />
           {labels ? 'Hide labels' : 'Show labels'}
         </button>
-        <ThemeSwitch className="" />
+        <SettingsMenu />
       </div>
     </>
   )

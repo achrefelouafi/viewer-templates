@@ -20,8 +20,51 @@ export function isDark() {
   return chosen ? chosen === 'dark' : system()
 }
 
+/** The interface's style: solid panels, or frosted glass ones over the plan. */
+export type UiStyle = 'solid' | 'glass'
+const STYLE_KEY = 'pascal-viewer-ui-style'
+
+export function uiStyle(): UiStyle {
+  try {
+    return localStorage.getItem(STYLE_KEY) === 'glass' ? 'glass' : 'solid'
+  } catch {
+    return 'solid'
+  }
+}
+
 export function applyTheme() {
   document.documentElement.classList.toggle('dark', isDark())
+  document.documentElement.dataset.uiStyle = uiStyle()
+}
+
+const EDGES_KEY = 'pascal-viewer-plan-edges'
+
+/** Whether the plan's wireframe draws its edge lines; off by default, only the frosted faces show. */
+export function planEdges(): boolean {
+  try {
+    return localStorage.getItem(EDGES_KEY) === 'on'
+  } catch {
+    return false
+  }
+}
+
+export function choosePlanEdges(on: boolean) {
+  try {
+    localStorage.setItem(EDGES_KEY, on ? 'on' : 'off')
+  } catch {
+    // Not remembered; the choice still holds for this visit.
+  }
+  dispatchEvent(new Event('pascal-theme'))
+}
+
+export function chooseUiStyle(style: UiStyle) {
+  try {
+    localStorage.setItem(STYLE_KEY, style)
+  } catch {
+    // Not remembered; the choice still holds for this visit.
+  }
+  applyTheme()
+  dispatchEvent(new Event('pascal-theme'))
 }
 
 export function chooseTheme(dark: boolean) {

@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { length, mix, mrt, output, positionLocal, screenSize, screenUV, smoothstep, uniform, vec2, vec4 } from 'three/tsl'
 import { LineBasicNodeMaterial, MeshStandardNodeMaterial, type Node, type NodeBuilder, type NodeMaterial, type WebGPURenderer } from 'three/webgpu'
+import { planEdges } from '../../theme'
 import { colourMaterial, type DevelopRoom, notColoured, roomInk, roomOf, setRoomOutline, shiftRoomSlot } from './roomInk'
 
 /**
@@ -420,6 +421,9 @@ const ITEM_KINDS = new Set([
   'liquid-line',
 ])
 
+/** Openings: in the walls, but drawn in colour as the furniture is. */
+const OPENING_KINDS = new Set(['door', 'window', 'skylight', 'garage-door', 'fence-gate'])
+
 const SKIP_KINDS = new Set([
   'zone',
   'spawn',
@@ -546,6 +550,8 @@ function classifyMesh(
   }
 
   if (kind && SKIP_KINDS.has(kind)) return null
+  // Doors and windows are in colour like the furniture, glass and all: Home Assistant can open them.
+  if (kind && OPENING_KINDS.has(kind)) return { role: 'item', levelId }
 
   // 1. Baked GLB merged batches carry Pascal's own `SurfaceRole` (`glb-merge.ts`).
   if (ud.glbBatch && ud.role) {
@@ -715,14 +721,27 @@ function createKit(palette: Palette) {
   // With the whole home in colour the wireframe's furniture and floors would draw nothing: they are
   // left out of the frame then, so a visit costs what Pascal's own viewer does.
   let ghosts = true
+  // the edge lines are a setting (`planEdges`), off unless the visitor turns them on
+  let edges = false
+  const sync = () => {
+    const shown = new Map<THREE.Material, boolean>([[item, ghosts], [floor, ghosts], [itemEdge, ghosts && edges], [wallEdge, edges]])
+    for (const [material, on] of shown) material.visible = on
+    for (const { base, twin } of twins.values()) if (shown.has(base)) twin.visible = shown.get(base)!
+  }
+  sync()
   return {
     wall, item, floor, glass, ground, wallEdge, itemEdge, none, solid,
     /** Whether the wireframe draws furniture and floors at all (only while a room is picked). */
     ghosts(on: boolean) {
       if (on === ghosts) return
       ghosts = on
-      for (const material of [item, floor, itemEdge]) material.visible = on
-      for (const { base, twin } of twins.values()) if (base === item || base === floor || base === itemEdge) twin.visible = on
+      sync()
+    },
+    /** Whether the wireframe draws its edge lines. */
+    edges(on: boolean) {
+      if (on === edges) return
+      edges = on
+      sync()
     },
     /** The base material, or its twin that keeps a mesh's own motion. */
     moving(base: THREE.Material, motion: Motion | null): THREE.Material {
@@ -866,6 +885,17 @@ export function HomeNoir({ source, keep, hide, room = null }: { source: ViewerSo
       useViewer.getState().showSceneTheme(useViewer.getState().previewSceneTheme)
     }
   }, [appearance])
+
+  // the edge lines, as the settings panel says
+  useEffect(() => {
+    const sync = () => {
+      kit.edges(planEdges())
+      invalidate()
+    }
+    sync()
+    addEventListener('pascal-theme', sync)
+    return () => removeEventListener('pascal-theme', sync)
+  }, [kit, invalidate])
 
   useEffect(() => {
     kit.paint(palette)
@@ -1195,7 +1225,11 @@ export function HomeNoir({ source, keep, hide, room = null }: { source: ViewerSo
       const obj = sceneRegistry.nodes.get(id as never)
       if (obj) moving.push(obj)
     }
-    if (moving.length) scan(moving)
+    if (moving.length) {
+      scan(moving)
+      // and in colour: a door rebuilt as it swings gets its colour copy in the same frame
+      copyColour()
+    }
   })
 
   return null
