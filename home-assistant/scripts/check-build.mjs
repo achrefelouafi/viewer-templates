@@ -51,7 +51,7 @@ if (!(report.moduleCount > 0) || !Array.isArray(report.packages) || !Array.isArr
 
 // Check the installed tree and lockfile too, even for packages that were tree-shaken away.
 const installed = spawnSync('npm', ['ls', '@pascal-app/editor', 'next', '--all', '--json'], {
-  cwd: root, encoding: 'utf8',
+  cwd: root, encoding: 'utf8', shell: process.platform === 'win32',
 })
 if (installed.error) throw installed.error
 const tree = JSON.parse(installed.stdout)
