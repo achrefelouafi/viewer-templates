@@ -133,8 +133,11 @@ tour's route (which rooms, in which order, and whether it starts by itself) and 
   view**, Camera with **Use current** and **Clear**, Time of day, Levels and, live only, Walls. Choosing a time, levels or walls
   shows it on screen. The popovers change the screen, never the draft; when the screen differs
   from what Save keeps, the panel says so ("On screen now: …").
-- The tab sits on the right edge and the panel in the top-right corner; both step aside during
-  the tour, a walkthrough, VR and AR. Colours follow the light and dark themes (`styles.css`).
+- The tab sits at the top left beside the brand lockup and the panel docks on the left, so the
+  Explore panel and its rooms on the right stay in view while customising (`styles.css`
+  overrides the shared stylesheet's right-hand placement); phones keep the sheet across the
+  bottom. Both step aside during the tour, a walkthrough, VR and AR. Colours follow the light and
+  dark themes.
 - `<main>` carries `data-time-of-day`, `data-level-mode` and `data-wall-mode` for tests.
 
 ## The loading flow
