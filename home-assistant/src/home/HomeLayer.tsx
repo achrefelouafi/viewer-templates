@@ -245,9 +245,11 @@ export function HomeScene({ home, pins, selected, layer, onPress, room = null }:
 }
 
 /** Over the viewer: the connect button, the devices panel, and the questions the linking left. */
-export function HomeOverlay({ home, title, pins, selected, layer, onSelect, onLayer, onGroup, itemId = null, onCloseItem, roomId = null }: {
+export function HomeOverlay({ home, title, owner = null, pins, selected, layer, onSelect, onLayer, onGroup, itemId = null, onCloseItem, roomId = null }: {
   home: HomeLayer
   title: string
+  /** Who made the project in Pascal. */
+  owner?: string | null
   pins: PinRefs
   selected: string | null
   layer: FieldKind | null
@@ -264,8 +266,15 @@ export function HomeOverlay({ home, title, pins, selected, layer, onSelect, onLa
   const call = useHass((s) => s.call)
   return (
     <>
+      {/* the project and its author on the left: in the devices panel once connected, on their own before */}
+      {!home.connected && (
+        <div className="pointer-events-auto absolute top-4 left-4 z-30 grid max-w-[min(20rem,calc(100vw-2rem))] gap-1 rounded-2xl border border-border/60 bg-background/90 px-4 py-3 shadow-lg backdrop-blur">
+          <b className="font-semibold leading-snug">{title}</b>
+          {owner && <span className="truncate font-mono text-[10px] text-muted-foreground">By {owner}</span>}
+        </div>
+      )}
       {home.connected && (
-        <HomePanel title={title} devices={home.devices} areas={home.areas} entities={home.entities} selected={selected} lastCall={null} notice={null}
+        <HomePanel owner={owner} title={title} devices={home.devices} areas={home.areas} entities={home.entities} selected={selected} lastCall={null} notice={null}
           layer={layer} pins={pins} onSelect={onSelect} call={(d, s, data) => call(d, s, data)} onLayer={onLayer} {...(onGroup ? { onGroup } : {})} />
       )}
       <ConnectCard home={home} />
@@ -297,8 +306,8 @@ function ConnectCard({ home }: { home: HomeLayer }) {
     )
   }
   return (
-    // where the devices panel will be once connected, as in the lab
-    <div className="pointer-events-auto absolute top-4 left-4 z-30 w-[min(18rem,calc(100vw-2rem))]">
+    // in the middle of the view until connected: the one thing to do first
+    <div className="pointer-events-auto absolute top-1/2 left-1/2 z-30 w-[min(20rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2">
       <form
           className="grid gap-3 rounded-2xl border border-border/60 bg-background/95 p-4 text-sm shadow-lg backdrop-blur"
           onSubmit={(ev) => {
@@ -479,9 +488,17 @@ function RoomCard({ home, roomId, onSelect }: { home: HomeLayer; roomId: string;
           <ul className="ui-scroll grid grid-cols-[minmax(0,1fr)] max-h-56 gap-1 overflow-y-auto">
             {addable.map((d) => (
               <li key={d.id}>
-                <button className={`${ROW} min-w-0`} onClick={() => home.pick(d.id, `${ROOM_PICK}${roomId}`)} type="button">
+                {/* a device Home Assistant puts in this very room but that isn't linked here yet: tinted, so it reads as left to do */}
+                <button
+                  className={`${ROW} min-w-0 ${d.own ? 'bg-amber-500/15 hover:bg-amber-500/25' : ''}`}
+                  onClick={() => home.pick(d.id, `${ROOM_PICK}${roomId}`)}
+                  title={d.own ? `In ${name} in Home Assistant, not linked yet` : undefined}
+                  type="button"
+                >
                   <span className="min-w-0 truncate">{d.name}</span>
-                  <span className="min-w-0 max-w-[45%] truncate text-muted-foreground text-xs">{d.area ?? 'No area'}</span>
+                  <span className={`min-w-0 max-w-[45%] truncate text-xs ${d.own ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>
+                    {d.own ? 'Not linked' : (d.area ?? 'No area')}
+                  </span>
                 </button>
               </li>
             ))}

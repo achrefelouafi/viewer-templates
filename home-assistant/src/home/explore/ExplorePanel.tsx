@@ -12,7 +12,7 @@ import {
   viewerSidebarSections,
   type ViewerSource,
 } from '@pascal-app/viewer/ui'
-import { ArrowUpRight, Layers, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { ArrowUpRight, Layers, MousePointerClick, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { OutreachLinks } from './OutreachLinks'
 import { BottomSheet } from './BottomSheet'
@@ -196,6 +196,11 @@ export function ExplorePanel({
           onSelectRoom={selectRoom}
           source={source}
         />
+        {/* rooms are buttons: say so, rather than leaving it to a hover */}
+        <p className="mt-1.5 flex items-center gap-1.5 text-muted-foreground text-xs">
+          <MousePointerClick aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+          Click a room to see and link its devices
+        </p>
       </div>
     ) : null
 
@@ -357,7 +362,7 @@ export function ExplorePanel({
           <div className="px-4 pt-3 pb-3.5">
             {/* 6px in from the top and right edges, like the collapsed pill's padding, so the
                 toggle stays put between the two states. */}
-            <div className="-mx-2.5 -mt-1.5 mb-3 flex items-center justify-between gap-2">
+            <div className="-mx-2.5 -mt-1.5 flex items-center justify-between gap-2">
               {!embed ? (
                 <div className="min-w-0">
                   <OutreachLinks />
@@ -383,22 +388,6 @@ export function ExplorePanel({
                   </span>
                 </TooltipContent>
               </Tooltip>
-            </div>
-            <div className="min-w-0">
-              <p className="ui-eyebrow ui-eyebrow-rule">Project</p>
-              <button
-                className="mt-1 block max-w-full truncate rounded-sm text-left font-light text-[28px] text-foreground leading-[1.06] tracking-[-0.03em] transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
-                onClick={selectBuilding}
-                title="Frame whole building"
-                type="button"
-              >
-                {projectName || 'Untitled'}
-              </button>
-              {ownerName ? (
-                <span className="mt-1 block truncate font-mono text-[10px] text-muted-foreground" data-viewer-owner="">
-                  {ownerName}
-                </span>
-              ) : null}
             </div>
           </div>
 

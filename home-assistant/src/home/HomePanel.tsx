@@ -621,11 +621,13 @@ function useHistory(entities: HassEntities) {
   return hist
 }
 
-export function HomePanel({ title, devices, areas, entities, selected, lastCall, notice, layer, pins, onSelect, onGroup, call, onLayer, isLab = false }: {
+export function HomePanel({ title, owner = null, devices, areas, entities, selected, lastCall, notice, layer, pins, onSelect, onGroup, call, onLayer, isLab = false }: {
   notice?: { text: string; at: number } | null
   /** A grouped pin was clicked: the devices under it, for the camera to zoom in on. */
   onGroup?: (entityIds: string[]) => void
   title: string
+  /** Who made the project in Pascal, under its name. */
+  owner?: string | null
   devices: HomeDevice[]
   areas: Area[]
   entities: HassEntities
@@ -767,9 +769,10 @@ export function HomePanel({ title, devices, areas, entities, selected, lastCall,
 
       {/* the device list, by room */}
       <aside aria-label="Devices" className="pointer-events-auto absolute top-4 left-4 flex max-h-[calc(100%-2rem)] w-72 flex-col overflow-hidden rounded-2xl border border-border/60 bg-background/90 shadow-lg backdrop-blur">
-        <header className="flex items-center justify-between border-border/60 border-b px-4 py-3">
-          <b className="font-semibold">{title}</b>
-          <span className="flex items-center gap-1.5 text-muted-foreground text-xs"><i className="size-1.5 rounded-full bg-emerald-400" />{active.length} of {switchable.length} on</span>
+        <header className="grid gap-1 border-border/60 border-b px-4 py-3">
+          <b className="font-semibold leading-snug">{title}</b>
+          {owner && <span className="truncate font-mono text-[10px] text-muted-foreground">By {owner}</span>}
+          <span className="mt-0.5 flex items-center gap-1.5 text-muted-foreground text-xs"><i className="size-1.5 rounded-full bg-emerald-400" />{active.length} of {switchable.length} on</span>
         </header>
         {/* only what is linked to the plan, by room: a device is linked by clicking its furniture */}
         <div className="ui-scroll overflow-y-auto py-1">

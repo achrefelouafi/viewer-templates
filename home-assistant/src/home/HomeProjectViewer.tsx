@@ -16,6 +16,7 @@ import { RoomLabels } from './explore/RoomLabels'
 import { useIsCompact } from './explore/useIsCompact'
 import { insideOutline, roomOf } from './sketch/roomInk'
 import { readStore, updateStore } from './storage'
+import { HelpGuide } from './sketch/HelpGuide'
 import { SettingsMenu } from './sketch/SettingsMenu'
 
 /* A Pascal project as the effects lab shows its home (src/lab/Lab.tsx), with the visitor's own
@@ -106,7 +107,10 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
   // the tour viewer's explore panel on the right: links to Pascal, the project, its floors, plan and rooms
   const levels = useSceneLevels(source)
   const compact = useIsCompact()
-  const [exploreOpen, setExploreOpen] = useState(true)
+  // folded until Home Assistant is connected: a visitor who hasn't connected sees the plan, the
+  // connect card and Pascal's links only; it opens once connected and folds again on disconnect
+  const [exploreOpen, setExploreOpen] = useState(false)
+  useEffect(() => setExploreOpen(home.connected), [home.connected])
   const [mobileExploreOpen, setMobileExploreOpen] = useState(false)
   useEffect(() => {
     // E opens or folds it, as in the tour viewer
@@ -213,7 +217,7 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
 
       <div className="contents" style={cardPlace}>
       <HomeOverlay home={home} itemId={itemId} layer={layer} onCloseItem={() => setItemId(null)} onGroup={zoomTo} onLayer={setLayer} onSelect={select} pins={pins}
-        roomId={roomId} selected={selected} title={title} />
+        owner={ownerName} roomId={roomId} selected={selected} title={title} />
 
       </div>
 
@@ -222,7 +226,7 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
         onOpenChange={setExploreOpen} onRoomSelect={pickRoom} open={exploreOpen} ownerName={ownerName} projectName={title} selectedRoomId={roomId} source={source} />
 
       {/* bottom right (over the Home Assistant pill on a phone): let the picked room go (not everyone knows Escape, and a tablet has none),
-          the rooms' labels on or off, and the settings (light or dark, solid or glass) */}
+          the rooms' labels on or off, the guide to linking devices, and the settings (light or dark, solid or glass) */}
       <div className="pointer-events-none absolute right-4 bottom-[4.75rem] z-30 flex flex-wrap items-center justify-end gap-2 sm:right-6 sm:bottom-6">
         {roomName && (
           <button aria-label={`Deselect ${roomName}`} className={TOOL} onClick={() => pickRoom(null)} type="button">
@@ -234,6 +238,7 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
           <Tag aria-hidden="true" className="h-3.5 w-3.5" />
           {labels ? 'Hide labels' : 'Show labels'}
         </button>
+        <HelpGuide />
         <SettingsMenu />
       </div>
     </>

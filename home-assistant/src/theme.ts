@@ -20,15 +20,15 @@ export function isDark() {
   return chosen ? chosen === 'dark' : system()
 }
 
-/** The interface's style: solid panels, or frosted glass ones over the plan. */
+/** The interface's style: frosted glass panels over the plan (the default), or solid ones. */
 export type UiStyle = 'solid' | 'glass'
 const STYLE_KEY = 'pascal-viewer-ui-style'
 
 export function uiStyle(): UiStyle {
   try {
-    return localStorage.getItem(STYLE_KEY) === 'glass' ? 'glass' : 'solid'
+    return localStorage.getItem(STYLE_KEY) === 'solid' ? 'solid' : 'glass'
   } catch {
-    return 'solid'
+    return 'glass'
   }
 }
 
