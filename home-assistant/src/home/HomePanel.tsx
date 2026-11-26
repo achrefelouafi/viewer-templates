@@ -50,6 +50,7 @@ import { MoreInfoLawnMower } from './controls/MoreInfoLawnMower'
 import { MoreInfoLight } from './controls/MoreInfoLight'
 import { MoreInfoLock } from './controls/MoreInfoLock'
 import { MoreInfoMediaPlayer } from './controls/MoreInfoMediaPlayer'
+import { TvRemotePad, useRemoteFor } from './controls/TvRemotePad'
 import { MoreInfoInputBoolean, MoreInfoSiren, MoreInfoSwitch } from './controls/MoreInfoToggleDomains'
 import { MoreInfoUpdate } from './controls/MoreInfoUpdate'
 import { MoreInfoVacuum } from './controls/MoreInfoVacuum'
@@ -294,6 +295,17 @@ function simulateLabel(dc: string, on: boolean) {
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
+/** A media player's controls, plus a remote pad when the same device has a remote (a TV). */
+function MediaPlayerWithRemote({ e, entities, call, formatters }: { e: HassEntity; entities: HassEntities; call: Call; formatters: EntityFormatters }) {
+  const remote = useRemoteFor(e, entities)
+  return (
+    <div className="flex flex-col gap-5">
+      <MoreInfoMediaPlayer entity={e} call={call} formatters={formatters} />
+      {remote && <TvRemotePad remote={remote} call={call} />}
+    </div>
+  )
+}
+
 function Controls({ e, entities, call, formatters, history, layer, onLayer, onSelect, areas, isLab }: { e: HassEntity; entities: HassEntities; call: Call; formatters: EntityFormatters; history: number[]; layer: FieldKind | null; onLayer: (k: FieldKind | null) => void; onSelect: (id: string | null) => void; areas: Area[]; isLab: boolean }) {
   const id = e.entity_id
   const a = e.attributes
@@ -331,7 +343,7 @@ function Controls({ e, entities, call, formatters, history, layer, onLayer, onSe
     case 'alarm_control_panel':
       return <MoreInfoAlarmControlPanel entity={e} call={call} formatters={formatters} />
     case 'media_player':
-      return <MoreInfoMediaPlayer entity={e} call={call} formatters={formatters} />
+      return <MediaPlayerWithRemote e={e} entities={entities} call={call} formatters={formatters} />
     case 'camera':
       return <MoreInfoCamera entity={e} call={call} formatters={formatters} />
     case 'image':
@@ -375,6 +387,7 @@ function Controls({ e, entities, call, formatters, history, layer, onLayer, onSe
     case 'remote':
       return (
         <MoreInfoRemote entity={e} call={call} formatters={formatters}>
+          <TvRemotePad remote={e} call={call} />
           {isLab && (
             <LabOnly label="Remote commands">
               <Actions items={['power', 'volume_down', 'volume_up', 'next'].map((c) => ({ t: CMD[c]!, go: () => call('remote', 'send_command', { entity_id: id, command: c }) }))} />
