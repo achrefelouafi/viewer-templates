@@ -1,5 +1,6 @@
-import { Box, EyeOff, Moon, Settings, Sparkles, Square, Sun } from 'lucide-react'
+import { Box, EyeOff, Moon, Settings, Sparkles, Square, Sun, Volume2, VolumeX } from 'lucide-react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { useSoundsOn } from '../sound'
 import { choosePlanEdges, chooseTheme, chooseUiStyle, isDark, planEdges, type UiStyle, uiStyle } from '../../theme'
 
 /** The theme and the interface's style as they are now, following every change. */
@@ -27,6 +28,7 @@ function useLook() {
 export function SettingsMenu({ className = '' }: { className?: string }) {
   const [open, setOpen] = useState(false)
   const { dark, style, edges } = useLook()
+  const [sounds, setSounds] = useSoundsOn()
   const root = useRef<HTMLDivElement>(null)
 
   // a click elsewhere or Escape closes the panel
@@ -69,6 +71,10 @@ export function SettingsMenu({ className = '' }: { className?: string }) {
           <Choice label="Wireframe edges">
             <Option active={!edges} icon={<EyeOff className="h-3.5 w-3.5" />} label="Hidden" onClick={() => choosePlanEdges(false)} />
             <Option active={edges} icon={<Box className="h-3.5 w-3.5" />} label="Shown" onClick={() => choosePlanEdges(true)} />
+          </Choice>
+          <Choice label="Sounds">
+            <Option active={sounds} icon={<Volume2 className="h-3.5 w-3.5" />} label="On" onClick={() => setSounds(true)} />
+            <Option active={!sounds} icon={<VolumeX className="h-3.5 w-3.5" />} label="Off" onClick={() => setSounds(false)} />
           </Choice>
         </div>
       )}

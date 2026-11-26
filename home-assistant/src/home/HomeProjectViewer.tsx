@@ -16,6 +16,7 @@ import { RoomLabels } from './explore/RoomLabels'
 import { useIsCompact } from './explore/useIsCompact'
 import { insideOutline, roomOf } from './sketch/roomInk'
 import { readStore, updateStore } from './storage'
+import { playPick, useUiSounds } from './sound'
 import { HelpGuide } from './sketch/HelpGuide'
 import { SettingsMenu } from './sketch/SettingsMenu'
 
@@ -89,6 +90,8 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
   const nodes = useScene((s) => s.nodes)
   const source = useMemo<ViewerSource>(() => ({ nodes, objectFor: (id) => sceneRegistry.nodes.get(id) }), [nodes])
   const home = useHomeLayer({ projectId, source, ready: sceneReady })
+  // the interface's sounds: the visitor's own clicks in this browser, never Home Assistant's changes
+  useUiSounds()
   const pins = useRef<Record<string, HTMLElement | null>>({})
   const [selected, setSelected] = useState<string | null>(null)
   const [layer, setLayer] = useState<FieldKind | null>('temperature')
@@ -160,6 +163,7 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
       if (e.key !== 'Escape') return
       const t = e.target as HTMLElement | null
       if (t?.closest('input, textarea, select, [contenteditable="true"]')) return
+      playPick(false)
       pickRoom(null)
     }
     addEventListener('keydown', onKey)
@@ -175,6 +179,8 @@ function HomeStage({ projectId, ownerName, title, sceneReady, onSceneReady, scen
   const pickItem = useCallback((id: string | null) => {
     setItemId(id)
     if (!id) return
+    // a click on the plan: the select tick, here only (never for what Home Assistant changes)
+    playPick(true)
     setSelected(null)
     // and it works as on Pascal's own viewer: a door swings, a window opens, a fridge or a fan runs.
     // Not what Home Assistant drives: that follows its device (its pin switches it)
