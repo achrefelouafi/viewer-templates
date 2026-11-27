@@ -49,7 +49,7 @@ export function arrivalOf(motion: Motion): number {
     case 'fly': return 0.9
     case 'rise': return 0.85
     case 'vortex': return 0.93
-    case 'settle': return 0.1
+    case 'page': return 0.8
     default: return 0.6
   }
 }
@@ -58,6 +58,21 @@ const _axis = new THREE.Vector3()
 
 function basePivot(element: BuildElement, out: THREE.Vector3) {
   return out.set(element.center.x, element.box.min.y, element.center.z)
+}
+
+/**
+ * Turns the piece `angle` radians about the bottom edge on its `side` face across `axis` (the
+ * hinge runs along `axis`): at 0 it is at rest, at π/2 it lies flat that way, at π it is folded
+ * right over onto the far side of the hinge.
+ */
+function hinge(element: BuildElement, axis: 'x' | 'z', side: 1 | -1, angle: number, pose: Pose) {
+  if (axis === 'x') {
+    pose.pivot.set(element.center.x, element.box.min.y, element.center.z + side * (element.size.z / 2))
+    pose.rotation.setFromAxisAngle(_axis.set(1, 0, 0), side * angle)
+  } else {
+    pose.pivot.set(element.center.x + side * (element.size.x / 2), element.box.min.y, element.center.z)
+    pose.rotation.setFromAxisAngle(_axis.set(0, 0, 1), -side * angle)
+  }
 }
 
 /**
@@ -127,18 +142,13 @@ export function poseAt(element: BuildElement, track: Track | undefined, time: nu
       break
     }
     case 'tilt': {
-      // The hinge is the bottom edge on the outer face; the panel starts lying flat outward.
-      const e = backOut(u, 0.5)
-      const angle = (Math.PI / 2) * (1 - e)
-      const halfX = element.size.x / 2
-      const halfZ = element.size.z / 2
-      if (motion.axis === 'x') {
-        pose.pivot.set(element.center.x, element.box.min.y, element.center.z + motion.side * halfZ)
-        pose.rotation.setFromAxisAngle(_axis.set(1, 0, 0), motion.side * angle)
-      } else {
-        pose.pivot.set(element.center.x + motion.side * halfX, element.box.min.y, element.center.z)
-        pose.rotation.setFromAxisAngle(_axis.set(0, 0, 1), -motion.side * angle)
-      }
+      // The hinge is the bottom edge on the `side` face; the panel starts lying flat that way.
+      hinge(element, motion.axis, motion.side, (Math.PI / 2) * (1 - backOut(u, 0.5)), pose)
+      break
+    }
+    case 'page': {
+      // Folded right over the hinge at first; it swings up through upright and lays down flat.
+      hinge(element, motion.axis, motion.side, Math.PI * (1 - backOut(easeInOutCubic(u), 0.6)), pose)
       break
     }
     case 'extend': {
@@ -191,12 +201,6 @@ export function poseAt(element: BuildElement, track: Track | undefined, time: nu
       pose.rotation.setFromAxisAngle(motion.axis, time * (1.4 + level * 1.5) * left)
       // Smaller up in the storm, full size as it lands.
       pose.scale.setScalar(0.55 + 0.45 * e)
-      break
-    }
-    case 'settle': {
-      // Solidifies out of what gathered there: a breath of growth about its centre.
-      pose.pivot.copy(element.center)
-      pose.scale.setScalar(0.94 + 0.06 * easeOutCubic(u))
       break
     }
   }

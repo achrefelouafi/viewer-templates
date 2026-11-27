@@ -277,17 +277,6 @@ export class GroundWaves {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Clay
-
-/** The white of an architect's model; single-sided like every overlay material here. */
-export function createClayMaterial(): THREE.Material {
-  const material = new MeshStandardNodeMaterial({ color: '#f1ede6', roughness: 0.92, metalness: 0 })
-  material.name = 'animation-clay'
-  material.userData.animationClay = true
-  return material
-}
-
-// ---------------------------------------------------------------------------------------------
 // Room floors
 
 type FloorTile = { mesh: THREE.Mesh; geometry: THREE.BufferGeometry; start: number; duration: number }

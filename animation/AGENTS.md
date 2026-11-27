@@ -23,7 +23,7 @@ read it before changing how projects are read.
 | `src/useProjectScene.ts` | Loading flow: access, scene read, bake download into a blob URL, runtime preparation, credential renewal, optional bake polling. |
 | `src/viewer/ProjectViewer.tsx` | The assembly. Keep it shaped like the hosted viewer's tree; it adds `BuildAnimator` in the canvas and mounts `HudShell` and `AnimationCaption` over it. |
 | `src/hud/` | Custom Light & Airy HUD over Pascal's stores and selection helpers: `HudShell.tsx` composes `NavigatorRail.tsx` (left collapsible project + building-section floor navigator), `ModeDock.tsx` (bottom-centre: the `ViewMenu.tsx` 3D/2D/Split menu, shown in every stage mode, then the Orbit/Animate switch (no walk or drone: this is an animation viewer) and `CameraMenu.tsx`, one button opening orbit left, orbit right and top view, 3D only; it preloads its `/icons/*.webp` with the page), `Inspector.tsx` (right Scene/Look/Light settings drawer) and `AnimationStudio.tsx` (the build animations, a panel of their own docked on the right, opened by the dock's Animate; Settings and Animations share the right edge, one at a time). `theme.ts` holds the interface theme (System, Light or Dark, saved in `localStorage`, set from Settings › Look); it sets `dark` and `data-hud-theme` on `<html>` and never touches the 3D scene. |
-| `src/animation/` | Build animations: `elements.ts` measures the pieces, `templates.ts` plans the ten timelines, `poses.ts` poses a piece at a moment, `effects.ts` draws dust, blueprint lines, ground waves, sand and the clay material, `BuildAnimator.tsx` plays a run, `AnimationsTab.tsx` provides `AnimationsPanel` (mounted in `src/hud/AnimationStudio.tsx`) and `useAnimationLifecycle`, `AnimationCaption.tsx` the title cards, `store.ts` joins them. |
+| `src/animation/` | Build animations: `elements.ts` measures the pieces, `templates.ts` plans the eight timelines, `poses.ts` poses a piece at a moment, `effects.ts` draws dust, blueprint lines, ground waves and room floors, `BuildAnimator.tsx` plays a run, `AnimationsTab.tsx` provides `AnimationsPanel` (mounted in `src/hud/AnimationStudio.tsx`) and `useAnimationLifecycle`, `AnimationCaption.tsx` the title cards, `store.ts` joins them. |
 | `src/viewer/screens.tsx`, `ErrorBoundary.tsx` | Status and Sign in with Pascal screens, the crash fallback. |
 | `src/runtime/bootstrap.ts` | `prepareSceneRuntime`: built-in nodes, viewer config (assets, sounds, icons, local decoders), read-only lease, library materials, artifact store, plugins. |
 | `src/runtime/plugins.ts` | The plugin allowlist, install-state rules and the unknown-kind warning. |
@@ -150,11 +150,12 @@ rules are in [listing's AGENTS.md](../listing/AGENTS.md#sign-in-with-pascal). In
   `thumbnail:before-capture`/`after-capture` pair so the batching systems re-sew cleanly.
 - **The animator's `useFrame` runs at priority 0**, before Pascal's render at priority 1, on a
   wall clock (a slow GPU slows the picture, not the timeline).
-- **A timeline can also drive** the time of day (`sun`, through `useViewer`'s `setTimeOfDayMinutes`,
-  put back after the run), title cards (`captions`), cinematic camera framings (`cameraKeys`), a
-  clay pass (`clay`: each piece's own meshes wear one shared white material until their time;
-  transparent glass keeps its own) and the sand build (`sand`: `sandReveal.ts` raises each piece out of sand from its foot, a slab
-  from its centre, its own materials rising behind through masked copies; no particles).
+- **A timeline can also drive** title cards (`captions`) and cinematic camera framings
+  (`cameraKeys`).
+- **Prefer transforms to extra draws.** Every template but Blueprint only moves, turns and scales
+  the pieces (Pop-up book's `tilt` and `page` hinge them on a bottom edge), which costs nothing on
+  the GPU. Sand drew a masked copy of every mesh and was too slow on real projects, so it was
+  replaced.
 - **A slab that spreads builds room by room**: `RoomFloors` lays a tile per room on it (the room's
   outline, slab-thick, in the slab's material), each growing from its own room's centre; the real
   slab takes over once the last tile is down.
@@ -176,11 +177,10 @@ rules are in [listing's AGENTS.md](../listing/AGENTS.md#sign-in-with-pascal). In
   wants once covered), and a finished build holds a beat, then switches back and is put back.
 - **Heavy animations are prepared ahead** (`Precompiler.tsx`, mounted by `BuildAnimator`): a moment
   after the project appears, in slices of a few milliseconds a frame, it draws Blueprint's floor
-  plans into textures, works out the wireframe's edges, and makes and compiles Sand's shared
-  material copies. Shaders are compiled by drawing stand-ins that every animation material discards
-  (`warmup.ts`: put `notWarmup()` in the mask of any new animation material), because three builds
-  a pipeline for Pascal's own scene pass and lights, which `compileAsync` would not match. Noir's
-  shaders depend on its lights, so `NoirLook` warms them as it mounts, while the first paper drops.
-  These materials and textures are kept for the page, never disposed between runs.
+  plans into textures and works out the wireframe's edges. Noir's shaders depend on its lights, so
+  `NoirLook` compiles them as it mounts, while the first paper drops, by drawing stand-ins that every
+  animation material discards (`warmup.ts`: put `notWarmup()` in the mask of any new animation
+  material); three builds a pipeline for Pascal's own scene pass and lights, which `compileAsync`
+  would not match. These materials and textures are kept for the page, never disposed between runs.
 - **Overlays use single-sided node materials** and never raycast: a double-sided node material in
   Pascal's MRT scene pass breaks the WebGPU render context.

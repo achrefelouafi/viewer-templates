@@ -15,13 +15,11 @@ free again.
 | Sky drop | Every piece falls from the sky, floor by floor, and lands with a squash and a puff of dust; furniture rains in last. |
 | Magnetic | The house hangs in the air exploded into its parts, then each piece flies home along an arc and snaps into place. |
 | Ripple | A shockwave rolls across the ground from the front door; the house springs up behind it, and a second wave brings the furniture. |
-| Golden hour | Built over one day: the sun rises on the slab, swings round as the walls go up, and sets as the roof lands; it ends at night with the windows lit. |
 | Tornado | A twister sweeps every piece up into its funnel, then sets the house down piece by piece, slab first. |
-| Sand | A ring of sand swirls round the plot, streams in grain by grain onto each piece's surfaces, and the piece hardens out of it. |
-| Clay model | The house goes up as a white architect's model, then a wave of colour washes over it and paints in the real materials. |
+| Pop-up book | Each floor turns over onto the last like a page, its walls, stairs and furniture fold up off it the way a pop-up page stands up, and the roof turns over last like a cover. |
 | Room tour | The camera visits each room in turn, with its name and area, while its walls rise and its furniture moves in; then it pulls out for the roof. |
 
-`?animation=<blueprint|timelapse|skydrop|magnetic|ripple|goldenhour|tornado|sand|clay|rooms>` plays one as soon as the scene is ready.
+`?animation=<blueprint|timelapse|skydrop|magnetic|ripple|tornado|popup|rooms>` plays one as soon as the scene is ready.
 The animations need one object per node, so this template rebuilds the published graph live by
 default (`VITE_PASCAL_SOURCE=live`); a bake merges the building into a few batches.
 

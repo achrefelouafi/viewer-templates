@@ -67,14 +67,6 @@ function TemplateGlyph({ id, accent }: { id: TemplateId; accent: string }) {
           <rect className="anim-snap-c" fill={accent} height="5" opacity="0.4" rx="1" width="16" x="12" y="5" />
         </svg>
       )
-    case 'goldenhour':
-      return (
-        <svg aria-hidden className="anim-glyph" viewBox="0 0 40 28">
-          <path {...common} d="M3 22 H37" />
-          <g className="anim-sun"><circle cx="20" cy="22" fill={accent} r="4" /></g>
-          <path d="M14 22 V16 L20 12 L26 16 V22" fill={accent} opacity="0.45" />
-        </svg>
-      )
     case 'tornado':
       return (
         <svg aria-hidden className="anim-glyph" viewBox="0 0 40 28">
@@ -82,20 +74,11 @@ function TemplateGlyph({ id, accent }: { id: TemplateId; accent: string }) {
           <rect className="anim-orbit" fill={accent} height="3.5" rx="0.6" width="3.5" x="28" y="5" />
         </svg>
       )
-    case 'sand':
+    case 'popup':
       return (
         <svg aria-hidden className="anim-glyph" viewBox="0 0 40 28">
-          <path d="M12 24 V15 L20 9 L28 15 V24 Z" fill={accent} opacity="0.35" />
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <circle className="anim-grain" cx={6 + i * 5.5} cy="5" fill={accent} key={i} r="1.2" style={{ animationDelay: `${i * 0.22}s`, ['--x' as string]: `${6 + i * 5.5}px` }} />
-          ))}
-        </svg>
-      )
-    case 'clay':
-      return (
-        <svg aria-hidden className="anim-glyph" viewBox="0 0 40 28">
-          <path d="M10 24 V14 L20 6 L30 14 V24 Z" fill="#ebe7df" stroke="#b9b2a5" strokeLinejoin="round" strokeWidth="1.1" />
-          <path className="anim-paint" d="M10 24 V14 L20 6 L30 14 V24 Z" fill={accent} />
+          <path {...common} d="M4 25 L20 22 L36 25 M20 22 V24.5" />
+          <path className="anim-popup" d="M13 22 V14 L20 8 L27 14 V22 Z" fill={accent} opacity="0.75" />
         </svg>
       )
     case 'rooms':

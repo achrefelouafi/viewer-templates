@@ -450,10 +450,8 @@ main[data-source] > div:has([class*="pascal-loader-"]) [class*="pascal-loader-"]
 .anim-tilt { transform-box: fill-box; transform-origin: 0% 100%; }
 .anim-ring { transform-box: fill-box; transform-origin: center; opacity: 0.55; }
 .anim-ring-2 { opacity: 0.28; transform: scale(0.65); }
-.anim-sun { transform: translate(0, -11px); }
 .anim-orbit { transform-box: view-box; transform-origin: 20px 12px; }
-.anim-grain { opacity: 0.9; }
-.anim-paint { clip-path: inset(0 45% 0 0); }
+.anim-popup { transform-box: fill-box; transform-origin: 50% 100%; }
 
 .anim-card:is([aria-pressed="true"], :hover, :focus-visible) .anim-draw { animation: anim-draw 2.6s ease-in-out infinite; }
 @keyframes anim-draw { 0% { stroke-dashoffset: 160; } 60%, 100% { stroke-dashoffset: 0; } }
@@ -470,14 +468,10 @@ main[data-source] > div:has([class*="pascal-loader-"]) [class*="pascal-loader-"]
 .anim-card:is([aria-pressed="true"], :hover, :focus-visible) .anim-ring { animation: anim-ring 2s ease-out infinite; }
 .anim-card:is([aria-pressed="true"], :hover, :focus-visible) .anim-ring-2 { animation-delay: 1s; }
 @keyframes anim-ring { 0% { transform: scale(0.1); opacity: 1; } 100% { transform: scale(1.1); opacity: 0; } }
-.anim-card:is([aria-pressed="true"], :hover, :focus-visible) .anim-sun { animation: anim-sun 3s ease-in-out infinite; }
-@keyframes anim-sun { 0% { transform: translate(-14px, 2px); } 50% { transform: translate(0, -14px); } 100% { transform: translate(14px, 2px); } }
 .anim-card:is([aria-pressed="true"], :hover, :focus-visible) .anim-orbit { animation: anim-orbit 1.4s linear infinite; }
 @keyframes anim-orbit { from { transform: rotate(0deg) scale(0.9); } to { transform: rotate(360deg) scale(0.9); } }
-.anim-card:is([aria-pressed="true"], :hover, :focus-visible) .anim-grain { animation: anim-grain 1.6s ease-in infinite; }
-@keyframes anim-grain { 0% { transform: translate(0, 0); opacity: 0; } 20% { opacity: 1; } 100% { transform: translate(calc(20px - var(--x, 0px)), 13px); opacity: 0; } }
-.anim-card:is([aria-pressed="true"], :hover, :focus-visible) .anim-paint { animation: anim-paint 2.6s ease-in-out infinite; }
-@keyframes anim-paint { 0%, 25% { clip-path: inset(0 100% 0 0); } 75%, 100% { clip-path: inset(0 0 0 0); } }
+.anim-card:is([aria-pressed="true"], :hover, :focus-visible) .anim-popup { animation: anim-popup 2.4s ease-in-out infinite; }
+@keyframes anim-popup { 0%, 15% { transform: scaleY(0.04); } 45% { transform: scaleY(1.12); } 55%, 100% { transform: scaleY(1); } }
 .anim-card:is([aria-pressed="true"], :hover, :focus-visible) .anim-room { animation: anim-room 3.2s steps(1) infinite; }
 @keyframes anim-room { 0% { transform: translate(0, 0); } 25% { transform: translate(14px, 0); } 50% { transform: translate(14px, 9px); } 75% { transform: translate(0, 9px); } }
 

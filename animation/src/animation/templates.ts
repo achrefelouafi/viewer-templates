@@ -29,8 +29,12 @@ export type Motion =
   | { kind: 'ripple'; bump: number }
   /** Whirls in a funnel (`level` 0 bottom to 1 top) until its turn, then spirals down into place. */
   | { kind: 'vortex'; funnel: Funnel; level: number; phase: number; axis: THREE.Vector3 }
-  /** Solidifies where it stands: a breath of growth about its centre. */
-  | { kind: 'settle' }
+  /**
+   * Turns over like a book's page: hinged on its bottom edge at the `side` end across `axis` (the
+   * axis the hinge runs along), it starts folded over onto the far side of the hinge and swings
+   * over into place.
+   */
+  | { kind: 'page'; axis: 'x' | 'z'; side: 1 | -1 }
 
 /** A tornado's funnel: its foot, height, radius at the foot and how much it widens per metre. */
 export type Funnel = { center: THREE.Vector3; bottom: number; height: number; radius: number; flare: number }
@@ -61,12 +65,6 @@ export type WavePlan = {
   waves: Array<{ start: number; speed: number; reach: number; color: string }>
 }
 
-/** Sand: each piece builds up out of sand over its track, its own surface rising behind (`sandReveal.ts`). */
-export type SandPlan = true
-
-/** The day the build takes: time of day (minutes after midnight) at moments of the timeline. */
-export type SunPlan = Array<{ time: number; minutes: number }>
-
 export type Caption = { start: number; end: number; title: string; sub?: string }
 
 /** A floor coming into colour: a circle growing from (x, z) to `radius` over the heights it claims. */
@@ -86,20 +84,15 @@ export type Timeline = {
   duration: number
   lines?: LinePlan
   waves?: WavePlan
-  sand?: SandPlan
-  sun?: SunPlan
   captions?: Caption[]
   cameraKeys?: CameraKey[]
-  /** Pieces show as white clay until their time here, then in their own materials. */
-  clay?: Map<string, number>
   noir?: NoirPlan
   /** The camera turns this many radians over the whole timeline when the cinematic camera is on. */
   orbit: number
 }
 
 export type TemplateId =
-  | 'blueprint' | 'timelapse' | 'skydrop' | 'magnetic' | 'ripple'
-  | 'goldenhour' | 'tornado' | 'sand' | 'clay' | 'rooms'
+  | 'blueprint' | 'timelapse' | 'skydrop' | 'magnetic' | 'ripple' | 'tornado' | 'popup' | 'rooms'
 
 export type AnimationTemplate = {
   id: TemplateId
@@ -545,60 +538,7 @@ const ripple: AnimationTemplate = {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 6. Golden hour: the house goes up over one day, dawn to night. The sun climbs and sets as it
-//    builds, the shadows swing round the plot, and the finished house stands in the evening.
-
-const goldenhour: AnimationTemplate = {
-  id: 'goldenhour',
-  name: 'Golden hour',
-  tagline: 'Built over one day: dawn light on the slab, long sunset shadows on the roof.',
-  accent: '#ff9f43',
-  build(set) {
-    const tracks = new Map<string, Track>()
-    // The sun rises in the east: each group follows it round, east side first.
-    const sunOrder = (a: BuildElement, b: BuildElement) => b.center.x - a.center.x
-    const end = floorByFloor(set, tracks, 0.6, (phase, group) => {
-      switch (phase) {
-        case 'ground': return { motion: () => ({ kind: 'spread' }), span: 1.8, each: 1.4, sort: sunOrder }
-        case 'walls': return {
-          motion: () => ({ kind: 'rise', overshoot: 0.3 }), span: crowd(group.length, 2.4, 4), each: 1.5,
-          sort: sunOrder, dust: 0.35,
-        }
-        case 'openings':
-        case 'items':
-        case 'exterior': return {
-          motion: () => ({ kind: 'pop', overshoot: 1.1 }), span: crowd(group.length, 1.2, 2.6), each: 0.8,
-          sort: sunOrder, overlap: phase === 'items' ? 0.9 : 0.7,
-        }
-        case 'roof': return { motion: () => ({ kind: 'drop', height: 2.2 }), span: 1.6, each: 1.5, sort: sunOrder, dust: 0.4 }
-        default: return { motion: () => ({ kind: 'rise', overshoot: 0.3 }), span: 1.2, each: 1.2, sort: sunOrder }
-      }
-    })
-    const duration = end + 2.6
-    return {
-      tracks,
-      duration,
-      // Dawn, a quick morning, a long golden afternoon, dusk as the last pieces land, then night.
-      sun: [
-        { time: 0, minutes: 5 * 60 + 40 },
-        { time: duration * 0.25, minutes: 9 * 60 },
-        { time: duration * 0.55, minutes: 15 * 60 },
-        { time: duration * 0.82, minutes: 19 * 60 + 10 },
-        { time: duration - 0.6, minutes: 21 * 60 + 15 },
-        { time: duration, minutes: 21 * 60 + 15 },
-      ],
-      captions: [
-        { start: 0.3, end: 2.6, title: 'Dawn', sub: 'Breaking ground' },
-        { start: duration * 0.42, end: duration * 0.42 + 2.2, title: 'Afternoon', sub: 'Walls up' },
-        { start: duration - 2.4, end: duration, title: 'Evening', sub: 'Home' },
-      ],
-      orbit: Math.PI * 0.6,
-    }
-  },
-}
-
-// ---------------------------------------------------------------------------------------------
-// 7. Tornado: a twister picks the house up in pieces and puts it down, the slab first, the
+// 6. Tornado: a twister picks the house up in pieces and puts it down, the slab first, the
 //    furniture last, each piece spiralling down out of the funnel into its place.
 
 const tornado: AnimationTemplate = {
@@ -645,69 +585,53 @@ const tornado: AnimationTemplate = {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 8. Sand: each piece builds up out of sand from its foot (a slab spreads from its centre), and its
-//    own surface rises through the sand behind it (`sandReveal.ts`).
+// 7. Pop-up book: each floor turns over onto the last like a book's page, and its walls,
+//    stairs and furniture fold up off it together, the way a pop-up page stands up as it opens;
+//    the roof turns over last and closes the house like a cover. Only transforms: no extra draws.
 
-const sand: AnimationTemplate = {
-  id: 'sand',
-  name: 'Sand',
-  tagline: 'Each piece builds up out of sand, and its real surface rises through it.',
-  accent: '#e0b46c',
-  build(set) {
-    const tracks = new Map<string, Track>()
-    const order = [...set.elements].sort((a, b) =>
-      byRank(a, b) || distanceFrom(a, set.center) - distanceFrom(b, set.center))
-    const end = crowd(order.length, 6, 9)
-    // Each piece takes its time: the sand climbs it, then its own surface climbs through the sand.
-    stagger(order, 0.4, end, 1.6, (e, start, duration) =>
-      tracks.set(e.id, { start, duration, motion: { kind: 'settle' } }))
-    return { tracks, duration: end + 1.4, sand: true, orbit: Math.PI * 0.7 }
-  },
+/** The longer horizontal side of the element, with its end facing the build's centre. */
+function inward(element: BuildElement, set: BuildSet): { axis: 'x' | 'z'; side: 1 | -1 } {
+  const { axis, side } = longAxis(element, set)
+  return { axis, side: side === 1 ? -1 : 1 }
 }
 
-// ---------------------------------------------------------------------------------------------
-// 9. Clay model: the house goes up as an architect's white model, then a wave of colour washes
-//    over it and paints in the real materials.
-
-const clay: AnimationTemplate = {
-  id: 'clay',
-  name: 'Clay model',
-  tagline: 'Built as a white architect’s model, then a wave of colour paints it real.',
-  accent: '#ff6fb5',
+const popup: AnimationTemplate = {
+  id: 'popup',
+  name: 'Pop-up book',
+  tagline: 'Each floor turns over like a page, and the walls and furniture fold up off it.',
+  accent: '#f08a5d',
   build(set) {
     const tracks = new Map<string, Track>()
-    const across = (a: BuildElement, b: BuildElement) => (a.center.x - a.center.z) - (b.center.x - b.center.z)
-    const t = floorByFloor(set, tracks, 0.3, (phase, group) => {
-      const motion: Motion = phase === 'ground' || phase === 'ceilings' ? { kind: 'spread' }
-        : phase === 'roof' ? { kind: 'drop', height: 1.5 }
-        : phase === 'walls' || phase === 'frame' || phase === 'stairs' ? { kind: 'rise', overshoot: 0.5 }
-        : { kind: 'pop', overshoot: 1.4 }
-      const span = phase === 'items' ? crowd(group.length, 1.4, 2.6) : crowd(group.length, 0.9, 2)
-      return { motion: () => motion, span, each: 0.7, sort: across, overlap: phase === 'items' ? 0.9 : 0.7 }
+    // The pages turn about the house's long side, alternating sides floor by floor like a book.
+    const spine: 'x' | 'z' = set.size.x >= set.size.z ? 'x' : 'z'
+    const page = (e: BuildElement): Motion => ({ kind: 'page', axis: spine, side: e.storey % 2 === 0 ? -1 : 1 })
+    const end = floorByFloor(set, tracks, 0.3, (phase, group) => {
+      switch (phase) {
+        case 'ground': return { motion: page, span: 0.3, each: 1.3, overlap: 0.9 }
+        // A pop-up page stands up all at once: a short spread, each piece folding up from flat.
+        case 'frame':
+        case 'walls': return {
+          motion: (e) => ({ kind: 'tilt', ...inward(e, set) }), span: crowd(group.length, 0.6, 1.4), each: 1,
+          sort: (a, b) => distanceFrom(a, set.center) - distanceFrom(b, set.center), overlap: 0.8,
+        }
+        case 'stairs': return { motion: (e) => ({ kind: 'tilt', ...inward(e, set) }), span: 0.5, each: 0.9 }
+        case 'openings': return { motion: () => ({ kind: 'pop', overshoot: 1.6 }), span: crowd(group.length, 0.6, 1.4), each: 0.5 }
+        case 'items': return {
+          motion: (e) => ({ kind: 'tilt', ...inward(e, set) }), span: crowd(group.length, 1, 2.2), each: 0.8,
+          sort: (a, b) => distanceFrom(a, set.center) - distanceFrom(b, set.center), overlap: 0.9,
+        }
+        case 'ceilings': return { motion: page, span: 0.5, each: 1.1 }
+        case 'exterior': return { motion: () => ({ kind: 'pop', overshoot: 1.4 }), span: 0.8, each: 0.5 }
+        case 'roof': return { motion: (e) => ({ kind: 'page', axis: spine, side: e.seed < 0.5 ? -1 : 1 }), span: 0.6, each: 1.5 }
+      }
     })
-    // A beat to look at the model, then the colour sweeps across from one corner.
-    const paintStart = t + 1.4
-    const origin = new THREE.Vector3(set.box.min.x, set.groundY, set.box.max.z)
-    let farthest = 1
-    for (const e of set.elements) farthest = Math.max(farthest, distanceFrom(e, origin))
-    const speed = farthest / 2.6
-    const paint = new Map<string, number>()
-    for (const e of set.elements) paint.set(e.id, paintStart + distanceFrom(e, origin) / speed + e.storey * 0.15)
-    const duration = paintStart + 2.6 + (set.storeys - 1) * 0.15 + 1.2
-    return {
-      tracks,
-      duration,
-      clay: paint,
-      waves: { origin, waves: [{ start: paintStart, speed, reach: farthest + 1.5, color: '#ff6fb5' }] },
-      captions: [{ start: paintStart - 1.2, end: paintStart + 1.4, title: 'Model', sub: 'Now in colour' }],
-      orbit: Math.PI * 0.5,
-    }
+    return { tracks, duration: end + 0.9, orbit: Math.PI * 0.6 }
   },
 }
 
 // ---------------------------------------------------------------------------------------------
-// 10. Room by room: the camera visits each room in turn while its walls rise, its doors and
-//     windows open up and its furniture moves in; then it pulls out as the roof goes on.
+// 8. Room by room: the camera visits each room in turn while its walls rise, its doors and
+//    windows open up and its furniture moves in; then it pulls out as the roof goes on.
 
 function roomOf(element: BuildElement, rooms: readonly BuildRoom[]): BuildRoom | null {
   const sameStorey = rooms.filter((room) => room.storey === element.storey)
@@ -799,7 +723,7 @@ const rooms: AnimationTemplate = {
 }
 
 export const TEMPLATES: readonly AnimationTemplate[] = [
-  blueprint, timelapse, skydrop, magnetic, ripple, goldenhour, tornado, sand, clay, rooms,
+  blueprint, timelapse, skydrop, magnetic, ripple, tornado, popup, rooms,
 ]
 
 

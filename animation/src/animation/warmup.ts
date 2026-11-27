@@ -52,7 +52,6 @@ export class Warmup {
   constructor(private readonly scene: THREE.Scene, private readonly perFrame = 12) {
     this.group.name = 'animation-warmup'
     this.group.userData.__tourNoir = true
-    this.group.userData.__sandReveal = true
   }
 
   add(items: Iterable<WarmItem>) {
@@ -94,7 +93,7 @@ export class Warmup {
       }
       object.frustumCulled = false
       object.raycast = NO_RAYCAST
-      object.userData = { __warmup: true, __tourNoir: true, __sandReveal: true }
+      object.userData = { __warmup: true, __tourNoir: true }
       if (item.layers !== undefined) object.layers.mask = item.layers
       this.group.add(object)
       this.live.push(object)

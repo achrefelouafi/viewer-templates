@@ -1,17 +1,16 @@
 import { emitter, sceneRegistry, useLocale, usePascalI18n } from '@pascal-app/core'
-import { showInScene, useViewer } from '@pascal-app/viewer'
+import { showInScene } from '@pascal-app/viewer'
 import { localizedLevelName, type ViewerSource } from '@pascal-app/viewer/ui'
 import type { CameraControlsImpl } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
-import { BlueprintLines, createClayMaterial, DustPool, GroundWaves, RoomFloors } from './effects'
+import { BlueprintLines, DustPool, GroundWaves, RoomFloors } from './effects'
 import { type BuildElement, type BuildSet, collectBuild } from './elements'
 import { clearFloorInk, floorInk, setFloorInk } from './ink'
 import { NoirLook } from './NoirLook'
 import { PaperSheet } from './paper'
 import { Precompiler } from './Precompiler'
-import { SandReveal } from './sandReveal'
 import { arrivalOf, createPose, poseAt, poseMatrix } from './poses'
 import { useAnimationStore } from './store'
 import { type Caption, type Timeline, templateById } from './templates'
@@ -45,20 +44,10 @@ type Run = {
   dust: DustPool
   lines: BlueprintLines | null
   waves: GroundWaves | null
-  /** Sand: each piece builds up from its foot out of sand, its own surface rising behind. */
-  sandReveal: SandReveal | null
   /** The Noir look's paper plans, one per floor. */
   papers: PaperSheet[]
   /** Slabs that build room by room: the tiles, and the slab hidden until they are down. */
   floors: Map<string, RoomFloors>
-  /** Clay: each mesh a piece owns, the time it gets its colour, and its own material. */
-  clay: {
-    material: THREE.Material
-    meshes: Array<{ mesh: THREE.Mesh; paintAt: number; own: THREE.Material | THREE.Material[] }>
-  } | null
-  /** The time of day before the run, put back after it. */
-  sunBefore: { timeOfDay: unknown; minutes: number | null } | null
-  lastMinutes: number
   cameraKey: number
   caption: Caption | null
   time: number
@@ -99,59 +88,6 @@ function handBackBatches(run: Run) {
   }
 }
 
-/** The meshes a piece draws itself, not those of pieces hosted under it (a wall's door). */
-function ownMeshes(element: BuildElement, others: ReadonlySet<THREE.Object3D>): THREE.Mesh[] {
-  const out: THREE.Mesh[] = []
-  const visit = (object: THREE.Object3D) => {
-    if (object !== element.object && others.has(object)) return
-    if ((object as THREE.Mesh).isMesh) out.push(object as THREE.Mesh)
-    for (const child of object.children) visit(child)
-  }
-  visit(element.object)
-  return out
-}
-
-function isTransparent(material: THREE.Material | THREE.Material[]): boolean {
-  const list = Array.isArray(material) ? material : [material]
-  return list.some((m) => m && (m.transparent && m.opacity < 0.95 || m.visible === false || /glass|glaz/i.test(m.name)))
-}
-
-function applyClay(run: Run, time: number) {
-  const clay = run.clay
-  if (!clay) return
-  for (const entry of clay.meshes) {
-    const { mesh } = entry
-    if (time < entry.paintAt) {
-      if (mesh.material !== clay.material) {
-        // Pascal may have given it a new material since: that one is its own now.
-        entry.own = mesh.material
-        mesh.material = clay.material
-      }
-    } else if (mesh.material === clay.material) {
-      mesh.material = entry.own
-    }
-  }
-}
-
-function applySun(run: Run, time: number) {
-  const sun = run.timeline.sun
-  if (!sun || sun.length === 0) return
-  let minutes = sun[sun.length - 1]!.minutes
-  for (let i = 0; i < sun.length - 1; i++) {
-    const a = sun[i]!
-    const b = sun[i + 1]!
-    if (time <= b.time) {
-      const k = b.time > a.time ? THREE.MathUtils.clamp((time - a.time) / (b.time - a.time), 0, 1) : 1
-      minutes = a.minutes + (b.minutes - a.minutes) * (k * k * (3 - 2 * k))
-      break
-    }
-  }
-  const rounded = Math.round(minutes)
-  if (rounded === run.lastMinutes) return
-  run.lastMinutes = rounded
-  useViewer.getState().setTimeOfDayMinutes(rounded)
-}
-
 const clamp01 = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t)
 const smooth = (t: number) => t * t * (3 - 2 * t)
 
@@ -188,19 +124,9 @@ function restore(run: Run) {
   run.dust.dispose()
   run.lines?.dispose()
   run.waves?.dispose()
-  run.sandReveal?.dispose()
   for (const floors of run.floors.values()) floors.dispose()
   for (const paper of run.papers) paper.dispose()
   if (run.timeline.noir) clearFloorInk()
-  if (run.clay) {
-    for (const entry of run.clay.meshes) if (entry.mesh.material === run.clay.material) entry.mesh.material = entry.own
-    run.clay.material.dispose()
-  }
-  if (run.sunBefore) {
-    const viewer = useViewer.getState()
-    viewer.setTimeOfDay(run.sunBefore.timeOfDay as Parameters<typeof viewer.setTimeOfDay>[0])
-    if (run.sunBefore.minutes !== null) viewer.setTimeOfDayMinutes(run.sunBefore.minutes)
-  }
   useAnimationStore.setState({ caption: null })
   // Let the batching systems re-sew from a clean slate: the same hand-back and re-hold Pascal
   // runs around a thumbnail capture. Originals the batches still draw go back under them.
@@ -211,7 +137,7 @@ function restore(run: Run) {
 /** A level's name as the navigator shows it ("Ground floor", "Floor 1"), for the paper's corner. */
 type LevelNamer = (levelId: string) => string | null
 
-function startRun(source: ViewerSource, scene: THREE.Scene, levelName: LevelNamer, renderer: unknown): Run | null {
+function startRun(source: ViewerSource, scene: THREE.Scene, levelName: LevelNamer): Run | null {
   const set = collectBuild(source)
   if (!set) return null
   const template = templateById(useAnimationStore.getState().template)
@@ -242,12 +168,6 @@ function startRun(source: ViewerSource, scene: THREE.Scene, levelName: LevelName
   const waves = timeline.waves ? new GroundWaves(timeline.waves) : null
   if (waves) scene.add(waves.group)
 
-  let sandReveal: SandReveal | null = null
-  if (timeline.sand) {
-    const others = new Set(set.elements.map((e) => e.object))
-    sandReveal = new SandReveal(set.elements, timeline.tracks, (element) => ownMeshes(element, others), renderer as never)
-  }
-
   // A slab that spreads in grows room by room, each from its own room's centre.
   const floors = new Map<string, RoomFloors>()
   for (const element of set.elements) {
@@ -268,21 +188,6 @@ function startRun(source: ViewerSource, scene: THREE.Scene, levelName: LevelName
     floors.set(element.id, tiles)
   }
 
-  let clay: Run['clay'] = null
-  if (timeline.clay) {
-    const material = createClayMaterial()
-    const others = new Set(set.elements.map((e) => e.object))
-    const meshes: NonNullable<Run['clay']>['meshes'] = []
-    for (const element of set.elements) {
-      const paintAt = timeline.clay.get(element.id) ?? 0
-      for (const mesh of ownMeshes(element, others)) {
-        if (isTransparent(mesh.material)) continue
-        meshes.push({ mesh, paintAt, own: mesh.material })
-      }
-    }
-    clay = { material, meshes }
-  }
-
   // One paper per floor, printed with the floor's plan from the scene's own nodes.
   const papers: PaperSheet[] = []
   for (const plan of timeline.noir?.papers ?? []) {
@@ -295,12 +200,9 @@ function startRun(source: ViewerSource, scene: THREE.Scene, levelName: LevelName
     papers.push(paper)
   }
 
-  const viewer = useViewer.getState()
-  const sunBefore = timeline.sun ? { timeOfDay: viewer.timeOfDay, minutes: viewer.timeOfDayMinutes } : null
-
   return {
-    set, timeline, elements, hiddenBatches: new Set(), dust, lines, waves, sandReveal, papers, floors, clay, sunBefore,
-    lastMinutes: -1, cameraKey: -1, caption: null,
+    set, timeline, elements, hiddenBatches: new Set(), dust, lines, waves, papers, floors,
+    cameraKey: -1, caption: null,
     time: 0, clock: 0, cameraTaken: false,
   }
 }
@@ -383,7 +285,6 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
   const scene = useThree((state) => state.scene)
   const controls = useThree((state) => state.controls) as Controls | null
   const invalidate = useThree((state) => state.invalidate)
-  const gl = useThree((state) => state.gl)
   const runRef = useRef<Run | null>(null)
   const runId = useAnimationStore((state) => state.runId)
   const status = useAnimationStore((state) => state.status)
@@ -405,7 +306,7 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
       restore(previous)
       runRef.current = null
     }
-    const run = startRun(sourceRef.current, scene, (id) => levelNameRef.current(id), gl)
+    const run = startRun(sourceRef.current, scene, (id) => levelNameRef.current(id))
     if (!run) {
       useAnimationStore.setState({ status: 'idle', pieceCount: 0, duration: 0 })
       return
@@ -416,16 +317,13 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
     if (store.seekTo !== null) run.time = store.seekTo
     applyPoses(run, run.time)
     handBackBatches(run)
-    applyClay(run, run.time)
-    applySun(run, run.time)
     applyNoir(run, run.time)
-    run.sandReveal?.update(run.time)
     if (store.cinematic && controls) {
       if (run.timeline.cameraKeys) updateCamera(run, controls, true)
       else frameBuild(controls, run.set, FRAMING_SPREAD[store.template] ?? 0.15)
     }
     invalidate()
-  }, [runId, ready, scene, controls, invalidate, gl])
+  }, [runId, ready, scene, controls, invalidate])
 
   // Stopping puts everything back where it was.
   useEffect(() => {
@@ -554,10 +452,7 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
 
     applyPoses(run, run.time)
     handBackBatches(run)
-    applyClay(run, run.time)
-    applySun(run, run.time)
     applyNoir(run, run.time)
-    run.sandReveal?.update(run.time)
     updateCamera(run, controls, state.cinematic)
     const caption = captionAt(run.timeline, run.time)
     if (caption !== run.caption) {

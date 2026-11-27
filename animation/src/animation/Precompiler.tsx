@@ -3,21 +3,17 @@ import { localizedLevelName, type ViewerSource } from '@pascal-app/viewer/ui'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import type * as THREE from 'three'
-import type { WebGPURenderer } from 'three/webgpu'
 import { type BuildElement, collectBuild } from './elements'
 import { prepareEdges } from './NoirLook'
 import { preparePaper } from './paper'
-import { prepareSandMaterials } from './sandReveal'
 import { useAnimationStore } from './store'
 import { templateById } from './templates'
-import { Warmup } from './warmup'
 
 /**
  * Gets the heavy animations ready while the project sits on screen, so pressing play doesn't
  * freeze: Blueprint's floor plans (drawn from SVG into textures) and the wireframe's edge lines
- * (worked out per geometry), and Sand's shared material copies, compiled by drawing them unseen
- * (`warmup.ts`). The work is cut into small slices, a few milliseconds a frame, starting a moment
- * after the project appears. Blueprint's own shaders depend on its lights, so `NoirLook` warms
+ * (worked out per geometry). The work is cut into small slices, a few milliseconds a frame,
+ * starting a moment after the project appears. Blueprint's own shaders depend on its lights, so `NoirLook` warms
  * those itself while the first paper drops in.
  */
 
@@ -39,8 +35,6 @@ function ownMeshes(element: BuildElement, others: ReadonlySet<THREE.Object3D>): 
 }
 
 export function Precompiler({ source, ready }: { source: ViewerSource; ready: boolean }) {
-  const scene = useThree((state) => state.scene)
-  const gl = useThree((state) => state.gl) as unknown as WebGPURenderer
   const invalidate = useThree((state) => state.invalidate)
   const i18n = usePascalI18n()
   const locale = useLocale()
@@ -51,7 +45,7 @@ export function Precompiler({ source, ready }: { source: ViewerSource; ready: bo
     const level = (sourceRef.current.nodes as unknown as Record<string, { level?: number; name?: string } | undefined>)[levelId]
     return level ? localizedLevelName(level, i18n, locale) : null
   }
-  const job = useRef<{ steps: Generator<void, void, void>; warmup: Warmup } | null>(null)
+  const job = useRef<Generator<void, void, void> | null>(null)
 
   useEffect(() => {
     if (!ready) return
@@ -65,8 +59,7 @@ export function Precompiler({ source, ready }: { source: ViewerSource; ready: bo
           window.setTimeout(start, 1000)
           return
         }
-        const warmup = new Warmup(scene, 10)
-        job.current = { steps: steps(warmup), warmup }
+        job.current = steps()
         invalidate()
       }
       start()
@@ -74,14 +67,12 @@ export function Precompiler({ source, ready }: { source: ViewerSource; ready: bo
     return () => {
       cancelled = true
       window.clearTimeout(timer)
-      job.current?.warmup.dispose()
       job.current = null
     }
-    // The scene and renderer are the canvas's for its lifetime.
     // biome-ignore lint/correctness/useExhaustiveDependencies: once per scene shown
   }, [ready])
 
-  function* steps(warmup: Warmup): Generator<void, void, void> {
+  function* steps(): Generator<void, void, void> {
     const source = sourceRef.current
     const set = collectBuild(source)
     yield
@@ -107,29 +98,17 @@ export function Precompiler({ source, ready }: { source: ViewerSource; ready: bo
       }
       yield
     }
-
-    // Sand: its shared copies, compiled by drawing them unseen.
-    for (const element of set.elements) {
-      warmup.add(prepareSandMaterials(ownMeshes(element, others), gl))
-      yield
-    }
   }
 
-  useFrame(({ camera }) => {
+  useFrame(() => {
     const current = job.current
     if (!current) return
     const until = performance.now() + BUDGET_MS
-    let done = false
     while (performance.now() < until) {
-      if (current.steps.next().done) {
-        done = true
-        break
+      if (current.next().done) {
+        job.current = null
+        return
       }
-    }
-    const drawing = current.warmup.step(camera)
-    if (done && !drawing) {
-      job.current = null
-      return
     }
     invalidate()
   })
