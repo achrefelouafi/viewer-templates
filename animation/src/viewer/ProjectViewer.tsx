@@ -39,6 +39,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import type { Object3D } from 'three'
 import { viewerFlagsFromLocation } from '../config'
 import type { SceneResponse } from '../pascal'
+import { AnimationCaption } from '../animation/AnimationCaption'
 import { AnimationsTab } from '../animation/AnimationsTab'
 import { BuildAnimator } from '../animation/BuildAnimator'
 import { pluginInstallStateOf, publishedSceneSetup } from '../runtime/plugins'
@@ -275,14 +276,10 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
           />
           {flags.embed ? null : <GuestPrompt />}
 
-          {/* The one addition to the default viewer: the Animations tab, above the controls bar. */}
+          {/* The one addition to the default viewer: the Animations tab on the right edge. */}
+          {stageMode !== '2d' && <AnimationCaption />}
           {stageMode !== '2d' && (
-            <AnimationsTab
-              liftClassName={flags.hideBottomBar || stageMode !== '3d'
-                ? 'bottom-4 sm:bottom-6'
-                : 'bottom-[4.75rem] sm:bottom-[5.25rem]'}
-              ready={!showSceneLoader}
-            />
+            <AnimationsTab ready={!showSceneLoader} />
           )}
 
           <ViewerStage

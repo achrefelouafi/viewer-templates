@@ -48,6 +48,8 @@ export function arrivalOf(motion: Motion): number {
     case 'tilt': return 0.78
     case 'fly': return 0.9
     case 'rise': return 0.85
+    case 'vortex': return 0.93
+    case 'settle': return 0.1
     default: return 0.6
   }
 }
@@ -72,7 +74,9 @@ export function poseAt(element: BuildElement, track: Track | undefined, time: nu
     pose.rest = true
     return pose
   }
-  if (time < track.start && !track.showBefore) {
+  // Hidden until it shows: its start, or earlier for a piece seen waiting (exploded, in a funnel).
+  const showFrom = track.showFrom ?? (track.showBefore ? -Infinity : track.start)
+  if (time < showFrom) {
     pose.visible = false
     return pose
   }
@@ -170,6 +174,36 @@ export function poseAt(element: BuildElement, track: Track | undefined, time: nu
       pose.offset.y = Math.sin(clamp01(u * 1.8) * Math.PI) * motion.bump * (1 - u)
       break
     }
+    case 'vortex': {
+      // Whirls in the funnel until its turn, then spirals down out of it into place.
+      const f = motion.funnel
+      const level = motion.level
+      const h = f.bottom + level * f.height + Math.sin(time * 2 + motion.phase) * 0.3
+      const r = f.radius + level * f.height * f.flare
+      const angle = motion.phase + time * (2.4 - level * 1.1)
+      const cx = f.center.x + Math.sin(time * 0.45) * f.radius * 0.35
+      const cz = f.center.z + Math.cos(time * 0.37) * f.radius * 0.35
+      const e = easeInOutCubic(u)
+      const left = 1 - e
+      pose.pivot.copy(element.center)
+      pose.offset.set(cx + Math.cos(angle) * r - element.center.x, h - element.center.y, cz + Math.sin(angle) * r - element.center.z)
+        .multiplyScalar(left)
+      pose.rotation.setFromAxisAngle(motion.axis, time * (1.4 + level * 1.5) * left)
+      // Smaller up in the storm, full size as it lands.
+      pose.scale.setScalar(0.55 + 0.45 * e)
+      break
+    }
+    case 'settle': {
+      // Solidifies out of what gathered there: a breath of growth about its centre.
+      pose.pivot.copy(element.center)
+      pose.scale.setScalar(0.94 + 0.06 * easeOutCubic(u))
+      break
+    }
+  }
+  // A piece seen before its turn grows in where it waits.
+  if (track.showFrom !== undefined && time < track.showFrom + 0.5) {
+    const k = Math.max(MIN, easeOutCubic(clamp01((time - track.showFrom) / 0.5)))
+    pose.scale.multiplyScalar(k)
   }
   return pose
 }

@@ -22,7 +22,7 @@ read it before changing how projects are read.
 | `src/App.tsx` | Maps the loading state to a screen or to `ProjectViewer`. |
 | `src/useProjectScene.ts` | Loading flow: access, scene read, bake download into a blob URL, runtime preparation, credential renewal, optional bake polling. |
 | `src/viewer/ProjectViewer.tsx` | The assembly. Keep it shaped like the hosted viewer's tree; it adds `BuildAnimator` in the canvas and `AnimationsTab` over it. |
-| `src/animation/` | Build animations: `elements.ts` measures the pieces, `templates.ts` plans the five timelines, `poses.ts` poses a piece at a moment, `effects.ts` draws dust, blueprint lines and ground waves, `BuildAnimator.tsx` plays a run, `AnimationsTab.tsx` is the tab, `store.ts` joins them. |
+| `src/animation/` | Build animations: `elements.ts` measures the pieces, `templates.ts` plans the ten timelines, `poses.ts` poses a piece at a moment, `effects.ts` draws dust, blueprint lines, ground waves, sand and the clay material, `BuildAnimator.tsx` plays a run, `AnimationsTab.tsx` is the right-docked tab, `AnimationCaption.tsx` the title cards, `store.ts` joins them. |
 | `src/viewer/ViewerOverlay.tsx`, `GuestPrompt.tsx`, `screens.tsx`, `ErrorBoundary.tsx` | Header and controls bar, the "Get started" card, status and Sign in with Pascal screens, the crash fallback. |
 | `src/runtime/bootstrap.ts` | `prepareSceneRuntime`: built-in nodes, viewer config (assets, sounds, icons, local decoders), read-only lease, library materials, artifact store, plugins. |
 | `src/runtime/plugins.ts` | The plugin allowlist, install-state rules and the unknown-kind warning. |
@@ -144,5 +144,16 @@ rules are in [listing's AGENTS.md](../listing/AGENTS.md#sign-in-with-pascal). In
   `thumbnail:before-capture`/`after-capture` pair so the batching systems re-sew cleanly.
 - **The animator's `useFrame` runs at priority 0**, before Pascal's render at priority 1, on a
   wall clock (a slow GPU slows the picture, not the timeline).
+- **A timeline can also drive** the time of day (`sun`, through `useViewer`'s `setTimeOfDayMinutes`,
+  put back after the run), title cards (`captions`), cinematic camera framings (`cameraKeys`), a
+  clay pass (`clay`: each piece's own meshes wear one shared white material until their time;
+  transparent glass keeps its own) and the sand cloud (`sand`).
+- **A slab that spreads builds room by room**: `RoomFloors` lays a tile per room on it (the room's
+  outline, slab-thick, in the slab's material), each growing from its own room's centre; the real
+  slab takes over once the last tile is down.
+- **Framing never uses `fitToBox`**: camera-controls snaps it to the box's nearest face, so a tilt
+  either side of 45 degrees flipped the view. `frameBox` keeps the azimuth, looks at the box's
+  bounding sphere and stands back to hold it; the panel's Zoom divides that distance and its Tilt
+  (or each template's own) sets the polar angle.
 - **Overlays use single-sided node materials** and never raycast: a double-sided node material in
   Pascal's MRT scene pass breaks the WebGPU render context.

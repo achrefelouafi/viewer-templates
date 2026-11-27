@@ -45,3 +45,18 @@ body { @apply bg-background text-foreground font-sans; text-wrap: pretty; }
 .anim-scrub { appearance: none; background: linear-gradient(to right, var(--anim-accent) var(--anim-progress), color-mix(in oklab, currentColor 18%, transparent) var(--anim-progress)); border-radius: 999px; }
 .anim-scrub::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; border-radius: 999px; background: var(--anim-accent); border: 2px solid var(--background, #fff); box-shadow: 0 1px 3px rgb(0 0 0 / .3); }
 .anim-scrub::-moz-range-thumb { width: 10px; height: 10px; border-radius: 999px; background: var(--anim-accent); border: 2px solid var(--background, #fff); }
+
+.anim-sun { animation: anim-sun 3s ease-in-out infinite; }
+@keyframes anim-sun { 0% { transform: translate(-14px, 2px); } 50% { transform: translate(0, -14px); } 100% { transform: translate(14px, 2px); } }
+.anim-orbit { transform-box: view-box; transform-origin: 20px 12px; animation: anim-orbit 1.4s linear infinite; }
+@keyframes anim-orbit { from { transform: rotate(0deg) scale(0.9); } to { transform: rotate(360deg) scale(0.9); } }
+.anim-grain { animation: anim-grain 1.6s ease-in infinite; }
+@keyframes anim-grain { 0% { transform: translate(0, 0); opacity: 0; } 20% { opacity: 1; } 100% { transform: translate(calc(20px - var(--x, 0px)), 13px); opacity: 0; } }
+.anim-paint { clip-path: inset(0 100% 0 0); animation: anim-paint 2.6s ease-in-out infinite; }
+@keyframes anim-paint { 0%, 25% { clip-path: inset(0 100% 0 0); } 75%, 100% { clip-path: inset(0 0 0 0); } }
+.anim-room { animation: anim-room 3.2s steps(1) infinite; }
+@keyframes anim-room { 0% { transform: translate(0, 0); } 25% { transform: translate(14px, 0); } 50% { transform: translate(14px, 9px); } 75% { transform: translate(0, 9px); } }
+
+/* A template's title card: big, light, centred over the scene. */
+.anim-caption { animation: anim-caption-in 0.6s cubic-bezier(.2,.8,.2,1) both; text-shadow: 0 2px 18px rgb(0 0 0 / .45); }
+@keyframes anim-caption-in { from { opacity: 0; transform: translateY(10px); letter-spacing: 0.08em; } to { opacity: 1; transform: none; } }

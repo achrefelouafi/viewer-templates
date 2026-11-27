@@ -23,6 +23,16 @@ type AnimationState = {
   runId: number
   /** A seek the animator should apply on its next frame. */
   seekTo: number | null
+  /** The title card a template shows at this moment (a room's name, the time of day). */
+  caption: { title: string; sub: string | null; key: string } | null
+  /** The panel is open on the right. */
+  panelOpen: boolean
+  /** How close the cinematic camera frames the build: 1 as planned, above 1 closer. */
+  zoom: number
+  /** The camera's tilt in degrees from straight down, or null for each template's own. */
+  tilt: number | null
+  /** Bumped when zoom or tilt changes, so the animator frames again at once. */
+  framingId: number
 
   select: (template: TemplateId) => void
   play: () => void
@@ -32,6 +42,8 @@ type AnimationState = {
   seek: (time: number) => void
   setSpeed: (speed: number) => void
   setCinematic: (on: boolean) => void
+  setZoom: (zoom: number) => void
+  setTilt: (tilt: number | null) => void
 }
 
 export const useAnimationStore = create<AnimationState>((set, get) => ({
@@ -44,6 +56,11 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
   pieceCount: 0,
   runId: 0,
   seekTo: null,
+  caption: null,
+  panelOpen: false,
+  zoom: 1,
+  tilt: null,
+  framingId: 0,
 
   select: (template) => set({ template, status: 'playing', time: 0, seekTo: null, runId: get().runId + 1 }),
   play: () => {
@@ -67,4 +84,6 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
   },
   setSpeed: (speed) => set({ speed }),
   setCinematic: (cinematic) => set({ cinematic }),
+  setZoom: (zoom) => set({ zoom, framingId: get().framingId + 1 }),
+  setTilt: (tilt) => set({ tilt, framingId: get().framingId + 1 }),
 }))

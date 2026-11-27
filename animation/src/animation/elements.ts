@@ -52,8 +52,21 @@ export type BuildElement = {
   seed: number
 }
 
+/** A room (zone) in world space: its outline on the ground, its storey and its floor area. */
+export type BuildRoom = {
+  id: string
+  name: string
+  outline: THREE.Vector2[]
+  bottom: number
+  top: number
+  storey: number
+  area: number
+  box: THREE.Box3
+}
+
 export type BuildSet = {
   elements: BuildElement[]
+  rooms: BuildRoom[]
   box: THREE.Box3
   center: THREE.Vector3
   size: THREE.Vector3
@@ -101,7 +114,16 @@ const PHASE_BY_KIND: Record<string, BuildPhase> = {
   'solar-panel': 'exterior',
 }
 
-type NodeLike = { id?: string; type?: string; parentId?: string | null; children?: string[] }
+type NodeLike = {
+  id?: string
+  type?: string
+  name?: string
+  parentId?: string | null
+  children?: string[]
+  polygon?: Array<[number, number]>
+  floor?: { elevation?: number }
+  height?: number
+}
 
 function phaseOf(kind: string): BuildPhase {
   return PHASE_BY_KIND[kind] ?? 'items'
@@ -231,10 +253,52 @@ export function collectBuild(source: ViewerSource): BuildSet | null {
   }
 
   if (elements.length === 0 || all.isEmpty()) return null
+
+  const rooms: BuildRoom[] = []
+  for (const [id, node] of Object.entries(nodes)) {
+    if (node?.type !== 'zone' || !node.polygon || node.polygon.length < 3) continue
+    const levelId = node.parentId ?? null
+    const levelObject = levelId ? objectFor(levelId) : undefined
+    const matrix = new THREE.Matrix4()
+    if (levelObject) {
+      levelObject.updateWorldMatrix(true, false)
+      matrix.copy(levelObject.matrixWorld)
+    }
+    const floor = node.floor?.elevation ?? 0
+    const height = (levelId ? nodes[levelId]?.height : undefined) ?? 2.7
+    const p = new THREE.Vector3()
+    const outline = node.polygon.map(([x, z]) => {
+      p.set(x, floor, z).applyMatrix4(matrix)
+      return new THREE.Vector2(p.x, p.z)
+    })
+    const bottom = p.set(node.polygon[0]![0], floor, node.polygon[0]![1]).applyMatrix4(matrix).y
+    let area = 0
+    const box = new THREE.Box3()
+    for (let i = 0; i < outline.length; i++) {
+      const a = outline[i]!
+      const b = outline[(i + 1) % outline.length]!
+      area += a.x * b.y - b.x * a.y
+      box.expandByPoint(new THREE.Vector3(a.x, bottom, a.y))
+    }
+    box.min.y = bottom
+    box.max.y = bottom + height
+    rooms.push({
+      id,
+      name: node.name?.trim() || '',
+      outline,
+      bottom,
+      top: bottom + height,
+      storey: levelId ? levelOrder.get(levelId) ?? 0 : 0,
+      area: Math.abs(area) / 2,
+      box,
+    })
+  }
+
   const center = all.getCenter(new THREE.Vector3())
   const size = all.getSize(new THREE.Vector3())
   return {
     elements,
+    rooms,
     box: all,
     center,
     size,
@@ -255,3 +319,28 @@ export function elementMeshes(element: BuildElement): THREE.Mesh[] {
 }
 
 export { SCENE_LAYER }
+
+/** Whether the point (x, z) is inside the outline. */
+export function insideOutline(outline: readonly THREE.Vector2[], x: number, z: number): boolean {
+  let inside = false
+  for (let i = 0, j = outline.length - 1; i < outline.length; j = i++) {
+    const a = outline[i]!
+    const b = outline[j]!
+    if ((a.y > z) !== (b.y > z) && x < ((b.x - a.x) * (z - a.y)) / (b.y - a.y) + a.x) inside = !inside
+  }
+  return inside
+}
+
+/** Distance from (x, z) to the outline's edges. */
+export function distanceToOutline(outline: readonly THREE.Vector2[], x: number, z: number): number {
+  let best = Infinity
+  for (let i = 0; i < outline.length; i++) {
+    const a = outline[i]!
+    const b = outline[(i + 1) % outline.length]!
+    const abx = b.x - a.x
+    const abz = b.y - a.y
+    const t = Math.max(0, Math.min(1, ((x - a.x) * abx + (z - a.y) * abz) / Math.max(1e-9, abx * abx + abz * abz)))
+    best = Math.min(best, Math.hypot(x - (a.x + abx * t), z - (a.y + abz * t)))
+  }
+  return best
+}

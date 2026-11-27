@@ -1,5 +1,7 @@
 import * as THREE from 'three'
-import { type BuildElement, type BuildPhase, type BuildSet, PHASE_ORDER } from './elements'
+import {
+  type BuildElement, type BuildPhase, type BuildRoom, type BuildSet, distanceToOutline, insideOutline, PHASE_ORDER,
+} from './elements'
 
 /**
  * The animation templates. Each one turns the build into a timeline: for every piece, when it
@@ -24,6 +26,13 @@ export type Motion =
   | { kind: 'fly'; from: THREE.Vector3; axis: THREE.Vector3; turns: number; arc: number; hover: number }
   /** An elastic pop as a wave front passes, with a little bump up. */
   | { kind: 'ripple'; bump: number }
+  /** Whirls in a funnel (`level` 0 bottom to 1 top) until its turn, then spirals down into place. */
+  | { kind: 'vortex'; funnel: Funnel; level: number; phase: number; axis: THREE.Vector3 }
+  /** Solidifies where it stands: a breath of growth about its centre. */
+  | { kind: 'settle' }
+
+/** A tornado's funnel: its foot, height, radius at the foot and how much it widens per metre. */
+export type Funnel = { center: THREE.Vector3; bottom: number; height: number; radius: number; flare: number }
 
 export type Track = {
   start: number
@@ -33,6 +42,8 @@ export type Track = {
   dust?: number
   /** Visible before its start, held at the motion's first pose (exploded views). */
   showBefore?: boolean
+  /** Visible (and growing in) from this time, waiting in the motion's first pose until its start. */
+  showFrom?: number
 }
 
 /** The build's blueprint lines, drawn on before the solids arrive. */
@@ -49,16 +60,35 @@ export type WavePlan = {
   waves: Array<{ start: number; speed: number; reach: number; color: string }>
 }
 
+/** Sand: each piece's grains wait in a swirling cloud, then stream in and land by its start. */
+export type SandPlan = { flight: number }
+
+/** The day the build takes: time of day (minutes after midnight) at moments of the timeline. */
+export type SunPlan = Array<{ time: number; minutes: number }>
+
+export type Caption = { start: number; end: number; title: string; sub?: string }
+
+/** Where the cinematic camera goes, and when: it frames `box` from `polar` (radians from straight down). */
+export type CameraKey = { time: number; box: THREE.Box3; polar: number }
+
 export type Timeline = {
   tracks: Map<string, Track>
   duration: number
   lines?: LinePlan
   waves?: WavePlan
+  sand?: SandPlan
+  sun?: SunPlan
+  captions?: Caption[]
+  cameraKeys?: CameraKey[]
+  /** Pieces show as white clay until their time here, then in their own materials. */
+  clay?: Map<string, number>
   /** The camera turns this many radians over the whole timeline when the cinematic camera is on. */
   orbit: number
 }
 
-export type TemplateId = 'blueprint' | 'timelapse' | 'skydrop' | 'magnetic' | 'ripple'
+export type TemplateId =
+  | 'blueprint' | 'timelapse' | 'skydrop' | 'magnetic' | 'ripple'
+  | 'goldenhour' | 'tornado' | 'sand' | 'clay' | 'rooms'
 
 export type AnimationTemplate = {
   id: TemplateId
@@ -368,7 +398,274 @@ const ripple: AnimationTemplate = {
   },
 }
 
-export const TEMPLATES: readonly AnimationTemplate[] = [blueprint, timelapse, skydrop, magnetic, ripple]
+// ---------------------------------------------------------------------------------------------
+// 6. Golden hour: the house goes up over one day, dawn to night. The sun climbs and sets as it
+//    builds, the shadows swing round the plot, and the finished house stands in the evening.
+
+const goldenhour: AnimationTemplate = {
+  id: 'goldenhour',
+  name: 'Golden hour',
+  tagline: 'Built over one day: dawn light on the slab, long sunset shadows on the roof.',
+  accent: '#ff9f43',
+  build(set) {
+    const tracks = new Map<string, Track>()
+    const phases = byPhase(set)
+    // The sun rises in the east: the build follows it round, east side first.
+    const sunOrder = (a: BuildElement, b: BuildElement) => b.center.x - a.center.x
+    let t = 0.6
+    const ground = phases.get('ground')!.sort((a, b) => a.storey - b.storey || sunOrder(a, b))
+    stagger(ground, t, t + 1.8, 1.4, (e, start, duration) => tracks.set(e.id, { start, duration, motion: { kind: 'spread' } }))
+    t += 1.6
+    for (let storey = 0; storey < set.storeys; storey++) {
+      const level = [...phases.get('frame')!, ...phases.get('walls')!, ...phases.get('stairs')!, ...phases.get('ceilings')!]
+        .filter((e) => e.storey === storey).sort((a, b) => sunOrder(a, b) || a.seed - b.seed)
+      const span = crowd(level.length, 2.6, 4.4)
+      stagger(level, t, t + span, 1.5, (e, start, duration) =>
+        tracks.set(e.id, { start, duration, motion: { kind: 'rise', overshoot: 0.3 }, dust: e.phase === 'walls' ? 0.35 : 0 }))
+      if (level.length) t += span - 0.6
+    }
+    const roof = phases.get('roof')!.sort((a, b) => a.box.min.y - b.box.min.y || sunOrder(a, b))
+    stagger(roof, t, t + 1.8, 1.5, (e, start, duration) =>
+      tracks.set(e.id, { start, duration, motion: { kind: 'drop', height: 2.2 }, dust: 0.4 }))
+    t += 1.4
+    const finish = [...phases.get('openings')!, ...phases.get('exterior')!, ...phases.get('items')!]
+      .sort((a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) || sunOrder(a, b))
+    const end = t + crowd(finish.length, 2.2, 3.6)
+    stagger(finish, t, end, 0.8, (e, start, duration) =>
+      tracks.set(e.id, { start, duration, motion: { kind: 'pop', overshoot: 1.1 } }))
+    const duration = end + 2.6
+    return {
+      tracks,
+      duration,
+      // Dawn, a quick morning, a long golden afternoon, dusk as the last pieces land, then night.
+      sun: [
+        { time: 0, minutes: 5 * 60 + 40 },
+        { time: duration * 0.25, minutes: 9 * 60 },
+        { time: duration * 0.55, minutes: 15 * 60 },
+        { time: duration * 0.82, minutes: 19 * 60 + 10 },
+        { time: duration - 0.6, minutes: 21 * 60 + 15 },
+        { time: duration, minutes: 21 * 60 + 15 },
+      ],
+      captions: [
+        { start: 0.3, end: 2.6, title: 'Dawn', sub: 'Breaking ground' },
+        { start: duration * 0.42, end: duration * 0.42 + 2.2, title: 'Afternoon', sub: 'Walls up' },
+        { start: duration - 2.4, end: duration, title: 'Evening', sub: 'Home' },
+      ],
+      orbit: Math.PI * 0.6,
+    }
+  },
+}
+
+// ---------------------------------------------------------------------------------------------
+// 7. Tornado: a twister picks the house up in pieces and puts it down, the slab first, the
+//    furniture last, each piece spiralling down out of the funnel into its place.
+
+const tornado: AnimationTemplate = {
+  id: 'tornado',
+  name: 'Tornado',
+  tagline: 'A twister carries every piece round and round, then sets the house down.',
+  accent: '#7f8cff',
+  build(set) {
+    const tracks = new Map<string, Track>()
+    const funnel: Funnel = {
+      center: set.center.clone(),
+      bottom: set.groundY + set.size.y + 3,
+      height: Math.max(8, set.size.y * 2.5),
+      radius: Math.max(2, set.radius * 0.35),
+      flare: 0.45,
+    }
+    const order = [...set.elements].sort((a, b) =>
+      a.storey - b.storey || PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) || a.seed - b.seed)
+    const end = crowd(order.length, 7, 10)
+    stagger(order, 2.6, end, 1.5, (e, start, duration, index) => {
+      // The last to land rides highest; everyone is swept up in the first couple of seconds.
+      const level = 0.1 + 0.9 * (order.length > 1 ? index / (order.length - 1) : 0.5)
+      tracks.set(e.id, {
+        start, duration,
+        showFrom: 0.1 + e.seed * 1.8,
+        motion: {
+          kind: 'vortex', funnel, level, phase: e.seed * TAU * 3,
+          axis: new THREE.Vector3(e.seed - 0.5, 0.4, ((e.seed * 13) % 1) - 0.5).normalize(),
+        },
+        dust: e.phase === 'items' ? 0.3 : 0.8,
+      })
+    })
+    // The storm in frame while it whirls, then down to the house as the last pieces land.
+    const storm = set.box.clone()
+    storm.max.y = funnel.bottom + funnel.height
+    const reach = funnel.radius + funnel.height * funnel.flare
+    storm.expandByPoint(new THREE.Vector3(set.center.x - reach, storm.max.y, set.center.z - reach))
+    storm.expandByPoint(new THREE.Vector3(set.center.x + reach, storm.max.y, set.center.z + reach))
+    const cameraKeys: CameraKey[] = [
+      { time: 0, box: storm, polar: Math.PI * 0.42 },
+      { time: end - 2.4, box: set.box.clone().expandByScalar(set.radius * 0.2), polar: Math.PI * 0.32 },
+    ]
+    return { tracks, duration: end + 1.2, cameraKeys, orbit: Math.PI * 0.8 }
+  },
+}
+
+// ---------------------------------------------------------------------------------------------
+// 8. Sand: a ring of sand swirls round the plot; it streams in grain by grain, settles on each
+//    piece's surfaces, and the piece hardens out of it.
+
+const sand: AnimationTemplate = {
+  id: 'sand',
+  name: 'Sand',
+  tagline: 'A swirling ring of sand streams in and hardens into the house, piece by piece.',
+  accent: '#e0b46c',
+  build(set) {
+    const tracks = new Map<string, Track>()
+    const order = [...set.elements].sort((a, b) =>
+      a.storey - b.storey || PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) ||
+      distanceFrom(a, set.center) - distanceFrom(b, set.center))
+    const flight = 1.6
+    const end = crowd(order.length, 7.5, 10)
+    stagger(order, 2.4, end, 0.6, (e, start, duration) =>
+      tracks.set(e.id, { start, duration, motion: { kind: 'settle' } }))
+    return { tracks, duration: end + 1.4, sand: { flight }, orbit: Math.PI * 0.7 }
+  },
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9. Clay model: the house goes up as an architect's white model, then a wave of colour washes
+//    over it and paints in the real materials.
+
+const clay: AnimationTemplate = {
+  id: 'clay',
+  name: 'Clay model',
+  tagline: 'Built as a white architect’s model, then a wave of colour paints it real.',
+  accent: '#ff6fb5',
+  build(set) {
+    const tracks = new Map<string, Track>()
+    const phases = byPhase(set)
+    let t = 0.3
+    for (const phase of PHASE_ORDER) {
+      const list = phases.get(phase)!.sort((a, b) => a.storey - b.storey || (a.center.x - a.center.z) - (b.center.x - b.center.z))
+      if (list.length === 0) continue
+      const span = phase === 'items' ? crowd(list.length, 1.4, 2.6) : crowd(list.length, 0.9, 2)
+      const motion: Motion = phase === 'ground' ? { kind: 'spread' }
+        : phase === 'roof' ? { kind: 'drop', height: 1.5 }
+        : phase === 'walls' || phase === 'frame' ? { kind: 'rise', overshoot: 0.5 }
+        : { kind: 'pop', overshoot: 1.4 }
+      stagger(list, t, t + span, 0.7, (e, start, duration) => tracks.set(e.id, { start, duration, motion }))
+      t += span * 0.7
+    }
+    // A beat to look at the model, then the colour sweeps across from one corner.
+    const paintStart = t + 1.4
+    const origin = new THREE.Vector3(set.box.min.x, set.groundY, set.box.max.z)
+    let farthest = 1
+    for (const e of set.elements) farthest = Math.max(farthest, distanceFrom(e, origin))
+    const speed = farthest / 2.6
+    const paint = new Map<string, number>()
+    for (const e of set.elements) paint.set(e.id, paintStart + distanceFrom(e, origin) / speed + e.storey * 0.15)
+    const duration = paintStart + 2.6 + (set.storeys - 1) * 0.15 + 1.2
+    return {
+      tracks,
+      duration,
+      clay: paint,
+      waves: { origin, waves: [{ start: paintStart, speed, reach: farthest + 1.5, color: '#ff6fb5' }] },
+      captions: [{ start: paintStart - 1.2, end: paintStart + 1.4, title: 'Model', sub: 'Now in colour' }],
+      orbit: Math.PI * 0.5,
+    }
+  },
+}
+
+// ---------------------------------------------------------------------------------------------
+// 10. Room by room: the camera visits each room in turn while its walls rise, its doors and
+//     windows open up and its furniture moves in; then it pulls out as the roof goes on.
+
+function roomOf(element: BuildElement, rooms: readonly BuildRoom[]): BuildRoom | null {
+  const sameStorey = rooms.filter((room) => room.storey === element.storey)
+  if (element.phase === 'walls' || element.phase === 'frame') {
+    // A wall belongs to the first room it bounds.
+    for (const room of sameStorey) {
+      if (distanceToOutline(room.outline, element.center.x, element.center.z) < 0.45) return room
+    }
+  }
+  for (const room of sameStorey) {
+    if (insideOutline(room.outline, element.center.x, element.center.z)) return room
+  }
+  if (element.phase === 'openings') {
+    for (const room of sameStorey) {
+      if (distanceToOutline(room.outline, element.center.x, element.center.z) < 0.45) return room
+    }
+  }
+  return null
+}
+
+const rooms: AnimationTemplate = {
+  id: 'rooms',
+  name: 'Room tour',
+  tagline: 'The camera walks you through each room as it is built and furnished.',
+  accent: '#4cc3ff',
+  build(set) {
+    const tracks = new Map<string, Track>()
+    const captions: Caption[] = []
+    const cameraKeys: CameraKey[] = [{ time: 0, box: set.box.clone(), polar: Math.PI * 0.27 }]
+    const ordered = [...set.rooms].sort((a, b) => a.storey - b.storey ||
+      (a.box.min.x + a.box.min.z) - (b.box.min.x + b.box.min.z))
+    const byRoom = new Map<string, BuildElement[]>()
+    const later: BuildElement[] = []
+    const ground: BuildElement[] = []
+    for (const e of set.elements) {
+      if (e.phase === 'ground' && e.storey === 0) {
+        ground.push(e)
+        continue
+      }
+      const room = e.phase === 'roof' || e.phase === 'exterior' ? null : roomOf(e, ordered)
+      if (!room) {
+        later.push(e)
+        continue
+      }
+      const list = byRoom.get(room.id)
+      if (list) list.push(e)
+      else byRoom.set(room.id, [e])
+    }
+
+    let t = 0.3
+    stagger(ground, t, t + 1.2, 1, (e, start, duration) => tracks.set(e.id, { start, duration, motion: { kind: 'spread' } }))
+    t += 1.4
+    const visited = ordered.filter((room) => byRoom.has(room.id))
+    visited.forEach((room, index) => {
+      const list = byRoom.get(room.id)!
+      const span = Math.min(4.2, 2.4 + list.length * 0.06)
+      cameraKeys.push({ time: t - 0.3, box: room.box.clone().expandByScalar(0.6), polar: Math.PI * 0.2 })
+      const name = room.name || `Room ${index + 1}`
+      captions.push({
+        start: t, end: t + span - 0.2, title: name,
+        sub: `${index + 1} of ${visited.length}${room.area > 0.5 ? ` · ${room.area.toFixed(1)} m²` : ''}`,
+      })
+      const structure = list.filter((e) => e.phase !== 'items' && e.phase !== 'openings')
+        .sort((a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) || a.seed - b.seed)
+      const openings = list.filter((e) => e.phase === 'openings')
+      const items = list.filter((e) => e.phase === 'items').sort((a, b) => a.box.min.y - b.box.min.y || a.seed - b.seed)
+      stagger(structure, t, t + span * 0.4, 0.8, (e, start, duration) =>
+        tracks.set(e.id, { start, duration, motion: e.phase === 'ground' ? { kind: 'spread' } : { kind: 'rise', overshoot: 0.5 }, dust: 0.25 }))
+      stagger(openings, t + span * 0.3, t + span * 0.55, 0.5, (e, start, duration) =>
+        tracks.set(e.id, { start, duration, motion: { kind: 'pop', overshoot: 1.4 } }))
+      stagger(items, t + span * 0.45, t + span * 0.95, 0.6, (e, start, duration) =>
+        tracks.set(e.id, { start, duration, motion: { kind: 'drop', height: 1.2 }, dust: 0.2 }))
+      t += span
+    })
+
+    // Out to the whole house for the shell: anything no room claimed, then the roof.
+    cameraKeys.push({ time: t - 0.2, box: set.box.clone().expandByScalar(set.radius * 0.35), polar: Math.PI * 0.33 })
+    later.sort((a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) || a.box.min.y - b.box.min.y)
+    const end = t + crowd(later.length, 1.6, 3)
+    stagger(later, t, end, 0.9, (e, start, duration) => tracks.set(e.id, {
+      start, duration,
+      motion: e.phase === 'roof' ? { kind: 'drop', height: 2.5 } : e.phase === 'items' ? { kind: 'pop' } : { kind: 'rise' },
+      dust: e.phase === 'roof' ? 0.5 : 0,
+    }))
+    captions.push({ start: end - 0.6, end: end + 1.6, title: 'Home', sub: `${visited.length} rooms` })
+    return { tracks, duration: end + 1.6, captions, cameraKeys, orbit: Math.PI * 0.35 }
+  },
+}
+
+export const TEMPLATES: readonly AnimationTemplate[] = [
+  blueprint, timelapse, skydrop, magnetic, ripple, goldenhour, tornado, sand, clay, rooms,
+]
+
 
 export function templateById(id: TemplateId): AnimationTemplate {
   return TEMPLATES.find((template) => template.id === id) ?? blueprint
