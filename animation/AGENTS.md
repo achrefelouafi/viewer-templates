@@ -131,6 +131,11 @@ rules are in [listing's AGENTS.md](../listing/AGENTS.md#sign-in-with-pascal). In
 
 ## Build animations
 
+- **Every template builds in hierarchy order**: floor by floor from the bottom, and on each floor
+  slab, frame, walls, stairs, doors and windows, furniture, then ceilings, outside fittings and
+  roof (`BUILD_ORDER` in `templates.ts`). Nothing that covers a piece (a ceiling, a roof, even a roof
+  on its own "Roof" level) may land before it. Use `floorByFloor` for grouped schedules, or sort by
+  `byRank` for one-list schedules.
 - **A template is a pure plan.** `build(set)` returns a `Timeline`: per node a `Track` (start,
   duration, `Motion`, optional dust and `showBefore`), plus optional blueprint lines and ground
   waves. Poses are a function of time, so seeking and replays cost nothing. Add a template by

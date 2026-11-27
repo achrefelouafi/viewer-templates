@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import {
-  type BuildElement, type BuildPhase, type BuildRoom, type BuildSet, distanceToOutline, insideOutline, PHASE_ORDER,
+  type BuildElement, type BuildPhase, type BuildRoom, type BuildSet, distanceToOutline, insideOutline,
 } from './elements'
 
 /**
@@ -104,12 +104,21 @@ export type AnimationTemplate = {
 
 const TAU = Math.PI * 2
 
-function byPhase(set: BuildSet): Map<BuildPhase, BuildElement[]> {
-  const map = new Map<BuildPhase, BuildElement[]>()
-  for (const phase of PHASE_ORDER) map.set(phase, [])
-  for (const element of set.elements) map.get(element.phase)!.push(element)
-  return map
+/**
+ * The order a house goes up in, on every floor: the slab, the frame, the walls, the stairs, the
+ * doors and windows, the furniture, and only then what closes it over (ceilings, the outside
+ * fittings, the roof), so nothing covers a piece before it has been seen arriving.
+ */
+const BUILD_ORDER: readonly BuildPhase[] = [
+  'ground', 'frame', 'walls', 'stairs', 'openings', 'items', 'ceilings', 'exterior', 'roof',
+]
+
+/** Floor first (bottom up), then the place in `BUILD_ORDER`: the hierarchy every template follows. */
+function buildRank(element: BuildElement): number {
+  return element.storey * BUILD_ORDER.length + BUILD_ORDER.indexOf(element.phase)
 }
+
+const byRank = (a: BuildElement, b: BuildElement) => buildRank(a) - buildRank(b)
 
 /**
  * Spreads `items` over the window `[from, to]`: the first starts at `from`, the last ends at `to`.
@@ -127,6 +136,50 @@ function stagger<T>(
   const d = Math.min(duration, span)
   const step = items.length > 1 ? (span - d) / (items.length - 1) : 0
   items.forEach((item, index) => assign(item, from + step * index, d, index))
+}
+
+/** How one group of a floor (its walls, its furniture...) arrives. */
+type Step = {
+  motion: (element: BuildElement) => Motion
+  /** Seconds over which the group's pieces start. */
+  span: number
+  /** Seconds each piece moves. */
+  each: number
+  sort?: (a: BuildElement, b: BuildElement) => number
+  dust?: number
+  /** Share of `span` before the next group starts (1 waits for the last start). */
+  overlap?: number
+}
+
+/**
+ * Schedules the build in hierarchy order: floor by floor from the bottom, each floor in
+ * `BUILD_ORDER`, every group starting once most of the one before it has started. Returns the time
+ * the last piece comes to rest.
+ */
+function floorByFloor(
+  set: BuildSet,
+  tracks: Map<string, Track>,
+  from: number,
+  step: (phase: BuildPhase, group: BuildElement[]) => Step,
+): number {
+  let t = from
+  let end = from
+  let top = 0
+  for (const element of set.elements) top = Math.max(top, element.storey)
+  for (let storey = 0; storey <= top; storey++) {
+    for (const phase of BUILD_ORDER) {
+      const group = set.elements.filter((e) => e.storey === storey && e.phase === phase)
+      if (group.length === 0) continue
+      const s = step(phase, group)
+      group.sort(s.sort ?? ((a, b) => a.seed - b.seed))
+      stagger(group, t, t + s.span, s.each, (e, start, duration) => {
+        tracks.set(e.id, { start, duration, motion: s.motion(e), dust: s.dust })
+        end = Math.max(end, start + duration)
+      })
+      t += s.span * (s.overlap ?? 0.7)
+    }
+  }
+  return end
 }
 
 /** Angle of the element's centre around the build's centre, 0 → 2π from +x, counter-clockwise. */
@@ -161,51 +214,30 @@ const blueprint: AnimationTemplate = {
   accent: '#3aa8ff',
   build(set) {
     const tracks = new Map<string, Track>()
-    const phases = byPhase(set)
     const draw = new Map<string, { start: number; duration: number }>()
 
-    // The pen sweeps across the plan, floor by floor, structure before furniture.
-    const sweep = [...set.elements].sort((a, b) =>
-      (a.phase === 'items' ? 1 : 0) - (b.phase === 'items' ? 1 : 0) ||
-      a.storey - b.storey ||
-      (a.center.x + a.center.z) - (b.center.x + b.center.z))
+    // The pen draws in the same hierarchy, sweeping across the plan within each group.
+    const sweep = [...set.elements].sort((a, b) => byRank(a, b) || (a.center.x + a.center.z) - (b.center.x + b.center.z))
     const penEnd = crowd(sweep.length, 2.6, 4.2)
     stagger(sweep, 0.2, penEnd, 0.9, (element, start, duration) => draw.set(element.id, { start, duration }))
 
-    let t = penEnd - 0.6
-    const ground = phases.get('ground')!.sort((a, b) => a.storey - b.storey)
-    stagger(ground, t, t + 1.2, 0.9, (e, start, duration) => tracks.set(e.id, { start, duration, motion: { kind: 'spread' } }))
-    t += 0.9
-
-    const frame = phases.get('frame')!.sort((a, b) => a.storey - b.storey || a.seed - b.seed)
-    stagger(frame, t, t + 0.8, 0.6, (e, start, duration) => tracks.set(e.id, { start, duration, motion: { kind: 'rise' } }))
-
-    const walls = phases.get('walls')!.sort((a, b) => a.storey - b.storey ||
-      (a.center.x + a.center.z) - (b.center.x + b.center.z))
-    const wallsEnd = t + crowd(walls.length, 2.4, 4)
-    stagger(walls, t, wallsEnd, 1.1, (e, start, duration) =>
-      tracks.set(e.id, { start, duration, motion: { kind: 'rise', overshoot: 0.6 } }))
-    t = wallsEnd - 0.5
-
-    const upper = [...phases.get('stairs')!, ...phases.get('ceilings')!, ...phases.get('roof')!]
-      .sort((a, b) => a.box.min.y - b.box.min.y)
-    stagger(upper, t, t + 1.6, 0.9, (e, start, duration) => tracks.set(e.id, {
-      start, duration, motion: e.phase === 'roof' ? { kind: 'drop', height: 2.5 } : { kind: 'rise' },
-    }))
-    t += 1.2
-
-    const openings = [...phases.get('openings')!, ...phases.get('exterior')!]
-      .sort((a, b) => a.storey - b.storey || a.seed - b.seed)
-    stagger(openings, t, t + 1.4, 0.6, (e, start, duration) =>
-      tracks.set(e.id, { start, duration, motion: { kind: 'pop', overshoot: 1.6 } }))
-    t += 1
-
-    const items = phases.get('items')!.sort((a, b) => a.storey - b.storey || distanceFrom(a, set.center) - distanceFrom(b, set.center))
-    const itemsEnd = t + crowd(items.length, 1.6, 3)
-    stagger(items, t, itemsEnd, 0.7, (e, start, duration) =>
-      tracks.set(e.id, { start, duration, motion: { kind: 'pop', overshoot: 2 } }))
-
-    const end = Math.max(itemsEnd, t + 0.8)
+    const plan = (a: BuildElement, b: BuildElement) => (a.center.x + a.center.z) - (b.center.x + b.center.z)
+    const end = floorByFloor(set, tracks, penEnd - 0.6, (phase, group) => {
+      switch (phase) {
+        case 'ground': return { motion: () => ({ kind: 'spread' }), span: 1.2, each: 0.9 }
+        case 'frame': return { motion: () => ({ kind: 'rise' }), span: 0.8, each: 0.6 }
+        case 'walls': return { motion: () => ({ kind: 'rise', overshoot: 0.6 }), span: crowd(group.length, 2.2, 3.8), each: 1.1, sort: plan }
+        case 'stairs': return { motion: () => ({ kind: 'rise' }), span: 0.8, each: 0.7 }
+        case 'openings': return { motion: () => ({ kind: 'pop', overshoot: 1.6 }), span: crowd(group.length, 0.9, 1.8), each: 0.6 }
+        case 'items': return {
+          motion: () => ({ kind: 'pop', overshoot: 2 }), span: crowd(group.length, 1.4, 2.8), each: 0.7,
+          sort: (a, b) => distanceFrom(a, set.center) - distanceFrom(b, set.center), overlap: 0.9,
+        }
+        case 'ceilings': return { motion: () => ({ kind: 'spread' }), span: 0.9, each: 0.7 }
+        case 'exterior': return { motion: () => ({ kind: 'pop', overshoot: 1.2 }), span: 0.9, each: 0.6 }
+        case 'roof': return { motion: () => ({ kind: 'drop', height: 2.5 }), span: 1.2, each: 1, dust: 0.4 }
+      }
+    })
     return {
       tracks,
       duration: end + 1.4,
@@ -217,7 +249,7 @@ const blueprint: AnimationTemplate = {
 
 // ---------------------------------------------------------------------------------------------
 // 2. Time-lapse: a building site played fast. Slabs poured, wall panels tilted up as a crane
-//    swings round, the roof lowered on, then windows and furniture.
+//    swings round, doors and windows fitted, furniture moved in, then the roof lowered on.
 
 const timelapse: AnimationTemplate = {
   id: 'timelapse',
@@ -226,55 +258,36 @@ const timelapse: AnimationTemplate = {
   accent: '#f5a524',
   build(set) {
     const tracks = new Map<string, Track>()
-    const phases = byPhase(set)
-    let t = 0.2
-
-    for (let storey = 0; storey < set.storeys; storey++) {
-      const onStorey = (list: BuildElement[]) => list.filter((e) => e.storey === storey)
-      const ground = onStorey(phases.get('ground')!).sort((a, b) => distanceFrom(a, set.center) - distanceFrom(b, set.center))
-      stagger(ground, t, t + 1, 0.8, (e, start, duration) => tracks.set(e.id, { start, duration, motion: { kind: 'spread' } }))
-      if (ground.length) t += 0.8
-
-      const frame = onStorey(phases.get('frame')!).sort((a, b) => angleAround(a, set) - angleAround(b, set))
-      stagger(frame, t, t + 0.9, 0.5, (e, start, duration) =>
-        tracks.set(e.id, { start, duration, motion: { kind: 'drop', height: 3 }, dust: 0.5 }))
-      if (frame.length) t += 0.5
-
-      // The crane goes round the floor once: each panel is tilted up where it stands.
-      const walls = onStorey(phases.get('walls')!).sort((a, b) => angleAround(a, set, 0.6) - angleAround(b, set, 0.6))
-      const span = crowd(walls.length, 2.2, 4.2)
-      stagger(walls, t, t + span, 0.9, (e, start, duration) =>
-        tracks.set(e.id, { start, duration, motion: { kind: 'tilt', ...longAxis(e, set) }, dust: 0.8 }))
-      if (walls.length) t += span - 0.3
-
-      const stairs = onStorey([...phases.get('stairs')!, ...phases.get('ceilings')!])
-      stagger(stairs, t, t + 0.8, 0.6, (e, start, duration) =>
-        tracks.set(e.id, { start, duration, motion: { kind: e.phase === 'stairs' ? 'extend' : 'spread', ...longAxis(e, set) } as Motion }))
-      if (stairs.length) t += 0.5
-    }
-
-    const roof = phases.get('roof')!.sort((a, b) => a.box.min.y - b.box.min.y || a.seed - b.seed)
-    stagger(roof, t, t + 1.6, 1.2, (e, start, duration) =>
-      tracks.set(e.id, { start, duration, motion: { kind: 'drop', height: 4 }, dust: 0.6 }))
-    if (roof.length) t += 1.2
-
-    const openings = [...phases.get('openings')!, ...phases.get('exterior')!]
-      .sort((a, b) => angleAround(a, set) - angleAround(b, set))
-    stagger(openings, t, t + crowd(openings.length, 1.2, 2.4), 0.55, (e, start, duration) =>
-      tracks.set(e.id, { start, duration, motion: { kind: 'pop', overshoot: 1.2 } }))
-    if (openings.length) t += 1
-
-    const items = phases.get('items')!.sort((a, b) => a.storey - b.storey || angleAround(a, set) - angleAround(b, set))
-    const itemsEnd = t + crowd(items.length, 1.6, 3.2)
-    stagger(items, t, itemsEnd, 0.8, (e, start, duration) =>
-      tracks.set(e.id, { start, duration, motion: { kind: 'drop', height: 1.6 }, dust: 0.25 }))
-
-    return { tracks, duration: Math.max(itemsEnd, t) + 0.8, orbit: Math.PI * 0.9 }
+    const around = (a: BuildElement, b: BuildElement) => angleAround(a, set, 0.6) - angleAround(b, set, 0.6)
+    const end = floorByFloor(set, tracks, 0.2, (phase, group) => {
+      switch (phase) {
+        case 'ground': return {
+          motion: () => ({ kind: 'spread' }), span: 1, each: 0.8,
+          sort: (a, b) => distanceFrom(a, set.center) - distanceFrom(b, set.center),
+        }
+        case 'frame': return { motion: () => ({ kind: 'drop', height: 3 }), span: 0.9, each: 0.5, sort: around, dust: 0.5 }
+        // The crane goes round the floor once: each panel is tilted up where it stands.
+        case 'walls': return {
+          motion: (e) => ({ kind: 'tilt', ...longAxis(e, set) }), span: crowd(group.length, 2.2, 4.2), each: 0.9,
+          sort: around, dust: 0.8, overlap: 0.85,
+        }
+        case 'stairs': return { motion: (e) => ({ kind: 'extend', ...longAxis(e, set) }), span: 0.8, each: 0.6 }
+        case 'openings': return { motion: () => ({ kind: 'pop', overshoot: 1.2 }), span: crowd(group.length, 1, 2), each: 0.55, sort: around }
+        case 'items': return {
+          motion: () => ({ kind: 'drop', height: 1.6 }), span: crowd(group.length, 1.4, 3), each: 0.8,
+          sort: around, dust: 0.25, overlap: 0.9,
+        }
+        case 'ceilings': return { motion: () => ({ kind: 'spread' }), span: 0.8, each: 0.6 }
+        case 'exterior': return { motion: () => ({ kind: 'pop', overshoot: 1 }), span: 0.9, each: 0.5, sort: around }
+        case 'roof': return { motion: () => ({ kind: 'drop', height: 4 }), span: 1.4, each: 1.2, dust: 0.6 }
+      }
+    })
+    return { tracks, duration: end + 0.8, orbit: Math.PI * 0.9 }
   },
 }
 
 // ---------------------------------------------------------------------------------------------
-// 3. Sky drop: every piece falls out of the sky, bottom first, and lands with a thump.
+// 3. Sky drop: every piece falls out of the sky, floor by floor, and lands with a thump.
 
 const skydrop: AnimationTemplate = {
   id: 'skydrop',
@@ -283,27 +296,18 @@ const skydrop: AnimationTemplate = {
   accent: '#ff5d73',
   build(set) {
     const tracks = new Map<string, Track>()
-    const structure = set.elements.filter((e) => e.phase !== 'items')
-      .sort((a, b) => a.storey - b.storey ||
-        PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) || a.seed - b.seed)
+    const order = [...set.elements].sort((a, b) => byRank(a, b) || a.seed - b.seed)
     const sky = Math.max(8, set.size.y * 2.2 + 6)
-    const structureEnd = crowd(structure.length, 4.5, 7)
-    stagger(structure, 0.2, structureEnd, 1.1, (e, start, duration) => tracks.set(e.id, {
+    const end = crowd(order.length, 6.5, 10)
+    stagger(order, 0.2, end, 1.1, (e, start, duration) => tracks.set(e.id, {
       start, duration,
-      motion: { kind: 'drop', height: sky * (0.8 + e.seed * 0.4) },
-      dust: e.phase === 'ground' || e.phase === 'walls' ? 1 : 0.6,
+      // Furniture tumbles a little on the way down.
+      motion: e.phase === 'items'
+        ? { kind: 'drop', height: sky * 0.6, spin: (e.seed - 0.5) * 2 }
+        : { kind: 'drop', height: sky * (0.8 + e.seed * 0.4) },
+      dust: e.phase === 'ground' || e.phase === 'walls' ? 1 : e.phase === 'items' ? 0.35 : 0.6,
     }))
-
-    // Furniture rains in last, tumbling a little on the way down.
-    const items = set.elements.filter((e) => e.phase === 'items').sort((a, b) => a.storey - b.storey || a.seed - b.seed)
-    const itemsEnd = structureEnd + crowd(items.length, 2, 3.4)
-    stagger(items, structureEnd - 0.4, itemsEnd, 0.9, (e, start, duration) => tracks.set(e.id, {
-      start, duration,
-      motion: { kind: 'drop', height: sky * 0.6, spin: (e.seed - 0.5) * 2 },
-      dust: 0.35,
-    }))
-
-    return { tracks, duration: itemsEnd + 1, orbit: Math.PI / 2.5 }
+    return { tracks, duration: end + 1, orbit: Math.PI / 2.5 }
   },
 }
 
@@ -318,16 +322,14 @@ const magnetic: AnimationTemplate = {
   build(set) {
     const tracks = new Map<string, Track>()
     const reach = set.radius * 1.6 + 3
-    // Inside out would hide the core behind the shell; the shell lands last, so the core is seen.
-    const order = [...set.elements].sort((a, b) =>
-      PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) || a.storey - b.storey || a.seed - b.seed)
+    const order = [...set.elements].sort((a, b) => byRank(a, b) || a.seed - b.seed)
     const end = crowd(order.length, 6, 8.5)
     stagger(order, 1.2, end, 1.6, (e, start, duration) => {
       const dir = new THREE.Vector3(e.center.x - set.center.x, 0, e.center.z - set.center.z)
       if (dir.lengthSq() < 1e-4) dir.set(Math.cos(e.seed * TAU), 0, Math.sin(e.seed * TAU))
       dir.normalize()
       const out = dir.multiplyScalar(reach * (0.55 + e.seed * 0.7))
-      out.y = set.size.y * 0.6 + (e.storey + 1) * 2.2 + e.seed * 3 + PHASE_ORDER.indexOf(e.phase) * 0.6
+      out.y = set.size.y * 0.6 + (e.storey + 1) * 2.2 + e.seed * 3 + BUILD_ORDER.indexOf(e.phase) * 0.6
       const axis = new THREE.Vector3(e.seed - 0.5, 0.6, 0.5 - ((e.seed * 7) % 1)).normalize()
       tracks.set(e.id, {
         start, duration,
@@ -341,8 +343,8 @@ const magnetic: AnimationTemplate = {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 5. Ripple: a wave crosses the ground from the front door; the house springs up behind it,
-//    then a second wave brings the furniture.
+// 5. Ripple: waves cross the ground from the front door, floor by floor: one raises the floor's
+//    shell, the next brings its furniture, the last closes it over with its ceilings and roof.
 
 const ripple: AnimationTemplate = {
   id: 'ripple',
@@ -360,41 +362,41 @@ const ripple: AnimationTemplate = {
 
     let farthest = 1
     for (const e of set.elements) farthest = Math.max(farthest, distanceFrom(e, origin) + Math.max(e.size.x, e.size.z) / 2)
-    // The front takes about 3.6 s to cross the plot, however big the house is.
-    const speed = Math.max(1.2, farthest / 3.6)
-    const structureStart = 0.4
-
-    for (const e of set.elements) {
-      if (e.phase === 'items') continue
-      const arrive = structureStart + distanceFrom(e, origin) / speed
-      // Higher floors trail the wave a little, so the house grows upward as well as outward.
-      const delay = e.storey * 0.45 + (PHASE_ORDER.indexOf(e.phase) / PHASE_ORDER.length) * 0.5
-      tracks.set(e.id, { start: arrive + delay, duration: 1.1, motion: { kind: 'ripple', bump: 0.35 } })
-    }
-    const secondStart = structureStart + farthest / speed + 0.6 + (set.storeys - 1) * 0.45
-    for (const e of set.elements) {
-      if (e.phase !== 'items') continue
-      tracks.set(e.id, {
-        start: secondStart + distanceFrom(e, origin) / (speed * 1.3) + e.storey * 0.3,
-        duration: 0.7,
-        motion: { kind: 'ripple', bump: 0.6 },
-      })
+    // A front takes about 3 s to cross the plot, however big the house is.
+    const speed = Math.max(1.2, farthest / 3)
+    const groups: Array<{ phases: BuildPhase[]; bump: number; duration: number; speed: number; color: string }> = [
+      { phases: ['ground', 'frame', 'walls', 'stairs', 'openings'], bump: 0.35, duration: 1.1, speed, color: '#2fd4a7' },
+      { phases: ['items'], bump: 0.6, duration: 0.7, speed: speed * 1.3, color: '#7ce8ff' },
+      { phases: ['ceilings', 'exterior', 'roof'], bump: 0.3, duration: 1, speed: speed * 1.15, color: '#b6f7e2' },
+    ]
+    const waves: WavePlan['waves'] = []
+    let top = 0
+    for (const e of set.elements) top = Math.max(top, e.storey)
+    let t = 0.4
+    for (let storey = 0; storey <= top; storey++) {
+      for (const group of groups) {
+        const list = set.elements.filter((e) => e.storey === storey && group.phases.includes(e.phase))
+        if (list.length === 0) continue
+        for (const e of list) {
+          // Within a wave the slab leads, the walls follow a beat behind, the openings last.
+          const lag = (group.phases.indexOf(e.phase) / group.phases.length) * 0.5
+          // The slab is laid as its wave sets off (its rooms grow from their centres); the rest
+          // rises where the front reaches it.
+          const reached = e.phase === 'ground' ? 0 : distanceFrom(e, origin) / group.speed
+          tracks.set(e.id, {
+            start: t + reached + lag + (e.phase === 'ground' ? 0 : 0.25),
+            duration: group.duration,
+            motion: { kind: 'ripple', bump: group.bump },
+          })
+        }
+        waves.push({ start: t, speed: group.speed, reach: farthest + 2, color: group.color })
+        t += (farthest / group.speed) * 0.8 + 0.35
+      }
     }
 
     let duration = 0
     for (const track of tracks.values()) duration = Math.max(duration, track.start + track.duration)
-    return {
-      tracks,
-      duration: duration + 0.8,
-      orbit: Math.PI / 2,
-      waves: {
-        origin,
-        waves: [
-          { start: structureStart, speed, reach: farthest + 2, color: '#2fd4a7' },
-          { start: secondStart, speed: speed * 1.3, reach: farthest + 2, color: '#7ce8ff' },
-        ],
-      },
-    }
+    return { tracks, duration: duration + 0.8, orbit: Math.PI / 2, waves: { origin, waves } }
   },
 }
 
@@ -409,30 +411,25 @@ const goldenhour: AnimationTemplate = {
   accent: '#ff9f43',
   build(set) {
     const tracks = new Map<string, Track>()
-    const phases = byPhase(set)
-    // The sun rises in the east: the build follows it round, east side first.
+    // The sun rises in the east: each group follows it round, east side first.
     const sunOrder = (a: BuildElement, b: BuildElement) => b.center.x - a.center.x
-    let t = 0.6
-    const ground = phases.get('ground')!.sort((a, b) => a.storey - b.storey || sunOrder(a, b))
-    stagger(ground, t, t + 1.8, 1.4, (e, start, duration) => tracks.set(e.id, { start, duration, motion: { kind: 'spread' } }))
-    t += 1.6
-    for (let storey = 0; storey < set.storeys; storey++) {
-      const level = [...phases.get('frame')!, ...phases.get('walls')!, ...phases.get('stairs')!, ...phases.get('ceilings')!]
-        .filter((e) => e.storey === storey).sort((a, b) => sunOrder(a, b) || a.seed - b.seed)
-      const span = crowd(level.length, 2.6, 4.4)
-      stagger(level, t, t + span, 1.5, (e, start, duration) =>
-        tracks.set(e.id, { start, duration, motion: { kind: 'rise', overshoot: 0.3 }, dust: e.phase === 'walls' ? 0.35 : 0 }))
-      if (level.length) t += span - 0.6
-    }
-    const roof = phases.get('roof')!.sort((a, b) => a.box.min.y - b.box.min.y || sunOrder(a, b))
-    stagger(roof, t, t + 1.8, 1.5, (e, start, duration) =>
-      tracks.set(e.id, { start, duration, motion: { kind: 'drop', height: 2.2 }, dust: 0.4 }))
-    t += 1.4
-    const finish = [...phases.get('openings')!, ...phases.get('exterior')!, ...phases.get('items')!]
-      .sort((a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) || sunOrder(a, b))
-    const end = t + crowd(finish.length, 2.2, 3.6)
-    stagger(finish, t, end, 0.8, (e, start, duration) =>
-      tracks.set(e.id, { start, duration, motion: { kind: 'pop', overshoot: 1.1 } }))
+    const end = floorByFloor(set, tracks, 0.6, (phase, group) => {
+      switch (phase) {
+        case 'ground': return { motion: () => ({ kind: 'spread' }), span: 1.8, each: 1.4, sort: sunOrder }
+        case 'walls': return {
+          motion: () => ({ kind: 'rise', overshoot: 0.3 }), span: crowd(group.length, 2.4, 4), each: 1.5,
+          sort: sunOrder, dust: 0.35,
+        }
+        case 'openings':
+        case 'items':
+        case 'exterior': return {
+          motion: () => ({ kind: 'pop', overshoot: 1.1 }), span: crowd(group.length, 1.2, 2.6), each: 0.8,
+          sort: sunOrder, overlap: phase === 'items' ? 0.9 : 0.7,
+        }
+        case 'roof': return { motion: () => ({ kind: 'drop', height: 2.2 }), span: 1.6, each: 1.5, sort: sunOrder, dust: 0.4 }
+        default: return { motion: () => ({ kind: 'rise', overshoot: 0.3 }), span: 1.2, each: 1.2, sort: sunOrder }
+      }
+    })
     const duration = end + 2.6
     return {
       tracks,
@@ -474,8 +471,7 @@ const tornado: AnimationTemplate = {
       radius: Math.max(2, set.radius * 0.35),
       flare: 0.45,
     }
-    const order = [...set.elements].sort((a, b) =>
-      a.storey - b.storey || PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) || a.seed - b.seed)
+    const order = [...set.elements].sort((a, b) => byRank(a, b) || a.seed - b.seed)
     const end = crowd(order.length, 7, 10)
     stagger(order, 2.6, end, 1.5, (e, start, duration, index) => {
       // The last to land rides highest; everyone is swept up in the first couple of seconds.
@@ -516,8 +512,7 @@ const sand: AnimationTemplate = {
   build(set) {
     const tracks = new Map<string, Track>()
     const order = [...set.elements].sort((a, b) =>
-      a.storey - b.storey || PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) ||
-      distanceFrom(a, set.center) - distanceFrom(b, set.center))
+      byRank(a, b) || distanceFrom(a, set.center) - distanceFrom(b, set.center))
     const flight = 1.6
     const end = crowd(order.length, 7.5, 10)
     stagger(order, 2.4, end, 0.6, (e, start, duration) =>
@@ -537,19 +532,15 @@ const clay: AnimationTemplate = {
   accent: '#ff6fb5',
   build(set) {
     const tracks = new Map<string, Track>()
-    const phases = byPhase(set)
-    let t = 0.3
-    for (const phase of PHASE_ORDER) {
-      const list = phases.get(phase)!.sort((a, b) => a.storey - b.storey || (a.center.x - a.center.z) - (b.center.x - b.center.z))
-      if (list.length === 0) continue
-      const span = phase === 'items' ? crowd(list.length, 1.4, 2.6) : crowd(list.length, 0.9, 2)
-      const motion: Motion = phase === 'ground' ? { kind: 'spread' }
+    const across = (a: BuildElement, b: BuildElement) => (a.center.x - a.center.z) - (b.center.x - b.center.z)
+    const t = floorByFloor(set, tracks, 0.3, (phase, group) => {
+      const motion: Motion = phase === 'ground' || phase === 'ceilings' ? { kind: 'spread' }
         : phase === 'roof' ? { kind: 'drop', height: 1.5 }
-        : phase === 'walls' || phase === 'frame' ? { kind: 'rise', overshoot: 0.5 }
+        : phase === 'walls' || phase === 'frame' || phase === 'stairs' ? { kind: 'rise', overshoot: 0.5 }
         : { kind: 'pop', overshoot: 1.4 }
-      stagger(list, t, t + span, 0.7, (e, start, duration) => tracks.set(e.id, { start, duration, motion }))
-      t += span * 0.7
-    }
+      const span = phase === 'items' ? crowd(group.length, 1.4, 2.6) : crowd(group.length, 0.9, 2)
+      return { motion: () => motion, span, each: 0.7, sort: across, overlap: phase === 'items' ? 0.9 : 0.7 }
+    })
     // A beat to look at the model, then the colour sweeps across from one corner.
     const paintStart = t + 1.4
     const origin = new THREE.Vector3(set.box.min.x, set.groundY, set.box.max.z)
@@ -612,7 +603,8 @@ const rooms: AnimationTemplate = {
         ground.push(e)
         continue
       }
-      const room = e.phase === 'roof' || e.phase === 'exterior' ? null : roomOf(e, ordered)
+      // Ceilings would hide the room from the camera above it: they close over with the roof.
+      const room = e.phase === 'roof' || e.phase === 'exterior' || e.phase === 'ceilings' ? null : roomOf(e, ordered)
       if (!room) {
         later.push(e)
         continue
@@ -636,7 +628,7 @@ const rooms: AnimationTemplate = {
         sub: `${index + 1} of ${visited.length}${room.area > 0.5 ? ` · ${room.area.toFixed(1)} m²` : ''}`,
       })
       const structure = list.filter((e) => e.phase !== 'items' && e.phase !== 'openings')
-        .sort((a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) || a.seed - b.seed)
+        .sort((a, b) => BUILD_ORDER.indexOf(a.phase) - BUILD_ORDER.indexOf(b.phase) || a.seed - b.seed)
       const openings = list.filter((e) => e.phase === 'openings')
       const items = list.filter((e) => e.phase === 'items').sort((a, b) => a.box.min.y - b.box.min.y || a.seed - b.seed)
       stagger(structure, t, t + span * 0.4, 0.8, (e, start, duration) =>
@@ -650,7 +642,7 @@ const rooms: AnimationTemplate = {
 
     // Out to the whole house for the shell: anything no room claimed, then the roof.
     cameraKeys.push({ time: t - 0.2, box: set.box.clone().expandByScalar(set.radius * 0.35), polar: Math.PI * 0.33 })
-    later.sort((a, b) => PHASE_ORDER.indexOf(a.phase) - PHASE_ORDER.indexOf(b.phase) || a.box.min.y - b.box.min.y)
+    later.sort((a, b) => byRank(a, b) || a.box.min.y - b.box.min.y)
     const end = t + crowd(later.length, 1.6, 3)
     stagger(later, t, end, 0.9, (e, start, duration) => tracks.set(e.id, {
       start, duration,
