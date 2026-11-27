@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import {
   type BuildElement, type BuildPhase, type BuildRoom, type BuildSet, distanceToOutline, insideOutline,
 } from './elements'
+import type { PaperPlan } from './paper'
 
 /**
  * The animation templates. Each one turns the build into a timeline: for every piece, when it
@@ -68,6 +69,15 @@ export type SunPlan = Array<{ time: number; minutes: number }>
 
 export type Caption = { start: number; end: number; title: string; sub?: string }
 
+/** A floor coming into colour: a circle growing from (x, z) to `radius` over the heights it claims. */
+export type DevelopPlan = { start: number; duration: number; x: number; z: number; radius: number; bottom: number; top: number }
+
+/**
+ * The Noir look (`NoirLook.tsx`, the Home Assistant viewer's wireframe) for the whole run: a
+ * paper plan per floor, each floor's colour developing, and everything in colour from `rest`.
+ */
+export type NoirPlan = { papers: PaperPlan[]; develop: DevelopPlan[]; rest: [number, number] }
+
 /** Where the cinematic camera goes, and when: it frames `box` from `polar` (radians from straight down). */
 export type CameraKey = { time: number; box: THREE.Box3; polar: number }
 
@@ -82,6 +92,7 @@ export type Timeline = {
   cameraKeys?: CameraKey[]
   /** Pieces show as white clay until their time here, then in their own materials. */
   clay?: Map<string, number>
+  noir?: NoirPlan
   /** The camera turns this many radians over the whole timeline when the cinematic camera is on. */
   orbit: number
 }
@@ -96,6 +107,8 @@ export type AnimationTemplate = {
   tagline: string
   /** Accent for the card and the template's overlays. */
   accent: string
+  /** The scene's look while it plays: 'noir' is the Home Assistant viewer's wireframe (`NoirLook.tsx`). */
+  look?: 'noir'
   build: (set: BuildSet) => Timeline
 }
 
@@ -205,44 +218,171 @@ function crowd(count: number, base: number, max: number): number {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 1. Blueprint: the drawing comes first, then the house fills its own lines.
+// 1. Blueprint: in the Home Assistant viewer's Noir wireframe. On each floor from the bottom up a
+//    paper sheet the size of the building drops in folded and opens out, printed with that floor's
+//    real 2D plan; the floor extrudes out of it, and its furniture and floors develop into colour.
+
+/** The pieces that give the building its footprint (not the garden's trees and fences). */
+const FOOTPRINT: ReadonlySet<BuildPhase> = new Set(['ground', 'frame', 'walls', 'stairs', 'openings', 'roof'])
 
 const blueprint: AnimationTemplate = {
   id: 'blueprint',
   name: 'Blueprint',
-  tagline: 'Glowing plan lines draw the house, then it fills itself in.',
-  accent: '#3aa8ff',
+  tagline: 'On each floor a paper plan unfolds, and the floor extrudes out of it in the noir wireframe.',
+  accent: '#9fb3c8',
+  look: 'noir',
   build(set) {
     const tracks = new Map<string, Track>()
-    const draw = new Map<string, { start: number; duration: number }>()
+    const papers: PaperPlan[] = []
+    const develop: DevelopPlan[] = []
+    const cameraKeys: CameraKey[] = []
 
-    // The pen draws in the same hierarchy, sweeping across the plan within each group.
-    const sweep = [...set.elements].sort((a, b) => byRank(a, b) || (a.center.x + a.center.z) - (b.center.x + b.center.z))
-    const penEnd = crowd(sweep.length, 2.6, 4.2)
-    stagger(sweep, 0.2, penEnd, 0.9, (element, start, duration) => draw.set(element.id, { start, duration }))
-
-    const plan = (a: BuildElement, b: BuildElement) => (a.center.x + a.center.z) - (b.center.x + b.center.z)
-    const end = floorByFloor(set, tracks, penEnd - 0.6, (phase, group) => {
-      switch (phase) {
-        case 'ground': return { motion: () => ({ kind: 'spread' }), span: 1.2, each: 0.9 }
-        case 'frame': return { motion: () => ({ kind: 'rise' }), span: 0.8, each: 0.6 }
-        case 'walls': return { motion: () => ({ kind: 'rise', overshoot: 0.6 }), span: crowd(group.length, 2.2, 3.8), each: 1.1, sort: plan }
-        case 'stairs': return { motion: () => ({ kind: 'rise' }), span: 0.8, each: 0.7 }
-        case 'openings': return { motion: () => ({ kind: 'pop', overshoot: 1.6 }), span: crowd(group.length, 0.9, 1.8), each: 0.6 }
-        case 'items': return {
-          motion: () => ({ kind: 'pop', overshoot: 2 }), span: crowd(group.length, 1.4, 2.8), each: 0.7,
-          sort: (a, b) => distanceFrom(a, set.center) - distanceFrom(b, set.center), overlap: 0.9,
-        }
-        case 'ceilings': return { motion: () => ({ kind: 'spread' }), span: 0.9, each: 0.7 }
-        case 'exterior': return { motion: () => ({ kind: 'pop', overshoot: 1.2 }), span: 0.9, each: 0.6 }
-        case 'roof': return { motion: () => ({ kind: 'drop', height: 2.5 }), span: 1.2, each: 1, dust: 0.4 }
+    // The sheet: the whole building's footprint in the plan's frame (the levels' x and z), padded.
+    const frame = set.levels[0]?.object
+    frame?.updateWorldMatrix(true, false)
+    const toPlan = frame ? frame.matrixWorld.clone().invert() : new THREE.Matrix4()
+    const toWorld = frame ? frame.matrixWorld.clone() : new THREE.Matrix4()
+    const footprint = set.elements.filter((e) => FOOTPRINT.has(e.phase))
+    const corner = new THREE.Vector3()
+    const plan = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+    for (const e of footprint.length ? footprint : set.elements) {
+      for (const x of [e.box.min.x, e.box.max.x]) for (const z of [e.box.min.z, e.box.max.z]) {
+        corner.set(x, e.box.min.y, z).applyMatrix4(toPlan)
+        plan.minX = Math.min(plan.minX, corner.x)
+        plan.maxX = Math.max(plan.maxX, corner.x)
+        plan.minY = Math.min(plan.minY, corner.z)
+        plan.maxY = Math.max(plan.maxY, corner.z)
       }
-    })
+    }
+    const pad = Math.max(1, 0.09 * Math.max(plan.maxX - plan.minX, plan.maxY - plan.minY))
+    const bounds = { minX: plan.minX - pad, minY: plan.minY - pad, maxX: plan.maxX + pad, maxY: plan.maxY + pad }
+    const sheetBox = (y: number) => {
+      const box = new THREE.Box3()
+      for (const x of [bounds.minX, bounds.maxX]) for (const z of [bounds.minY, bounds.maxY]) {
+        box.expandByPoint(corner.set(x, 0, z).applyMatrix4(toWorld).setY(y))
+      }
+      return box
+    }
+
+    let top = 0
+    for (const element of set.elements) top = Math.max(top, element.storey)
+    const lowest = (list: BuildElement[]) => list.reduce((m, e) => Math.min(m, e.box.min.y), Infinity)
+    const bottoms: number[] = []
+    for (let storey = 0; storey <= top; storey++) {
+      const on = set.elements.filter((e) => e.storey === storey && e.phase !== 'roof')
+      bottoms.push(on.length ? lowest(on) : Infinity)
+    }
+
+    const built = new THREE.Box3()
+    let t = 0.2
+    let end = t
+    for (let storey = 0; storey <= top; storey++) {
+      const onFloor = set.elements.filter((e) => e.storey === storey)
+      if (onFloor.length === 0) continue
+      const grounds = onFloor.filter((e) => e.phase === 'ground')
+      const walls = onFloor.filter((e) => e.phase === 'walls')
+      const level = set.levels[storey]
+      const floorBottom = grounds.length ? lowest(grounds) : walls.length ? lowest(walls) : lowest(onFloor)
+      const slabTop = grounds.length
+        ? Math.min(floorBottom + 0.6, grounds.reduce((m, e) => Math.max(m, e.box.max.y), -Infinity))
+        : floorBottom
+      const paperTop = Math.max(slabTop, walls.length ? lowest(walls) : slabTop) + 0.02
+      // The ground floor's sheet stays on the site's ground (y 0), never under it: a slab on a
+      // foundation reaches below the ground, and the sheet would vanish beneath it.
+      const paperRest = storey === 0 ? Math.max(0, floorBottom) + 0.012 : floorBottom + 0.004
+
+      // The camera holds what is built so far and the sheet coming in on top of it.
+      for (const e of onFloor) if (e.phase !== 'roof' && (e.phase !== 'items' || e.size.y < 20)) built.union(e.box)
+      cameraKeys.push({ time: Math.max(0, t - 0.3), box: built.clone().union(sheetBox(paperTop)), polar: Math.PI * 0.3 })
+
+      // The paper: drops in folded, the accordion opens across, the half folds over flat.
+      let p = t
+      let paper: PaperPlan | null = null
+      if (level && (grounds.length || walls.length)) {
+        const appear = t
+        const land = appear + 0.45
+        const open = land + 0.9
+        const flat = open + 0.65
+        paper = {
+          storey, levelId: level.id, title: level.name, bounds, top: paperTop, rest: paperRest,
+          appear, land, open, flat, sinkStart: 0, sinkEnd: 0, fadeStart: Infinity, fadeEnd: Infinity,
+        }
+        papers.push(paper)
+        p = flat + 0.15
+      }
+
+      // The floor extrudes out of the plan in the build's order.
+      const extrudeStart = p
+      let floorEnd = p
+      const centre = new THREE.Vector3()
+      const floorBox = new THREE.Box3()
+      for (const e of onFloor) if (FOOTPRINT.has(e.phase)) floorBox.union(e.box)
+      if (floorBox.isEmpty()) for (const e of onFloor) floorBox.union(e.box)
+      floorBox.getCenter(centre)
+      const sweep = (a: BuildElement, b: BuildElement) => distanceFrom(a, centre) - distanceFrom(b, centre)
+      for (const phase of BUILD_ORDER) {
+        const group = onFloor.filter((e) => e.phase === phase)
+        if (group.length === 0) continue
+        let s: Step
+        switch (phase) {
+          case 'ground': s = { motion: () => ({ kind: 'rise' }), span: 0.45, each: 0.55 }; break
+          case 'frame': s = { motion: () => ({ kind: 'rise' }), span: 0.5, each: 0.6 }; break
+          case 'walls': s = { motion: () => ({ kind: 'rise' }), span: crowd(group.length, 0.9, 1.9), each: 1, sort: sweep }; break
+          case 'stairs': s = { motion: () => ({ kind: 'rise' }), span: 0.6, each: 0.7 }; break
+          case 'openings': s = { motion: () => ({ kind: 'pop', overshoot: 1.3 }), span: crowd(group.length, 0.7, 1.4), each: 0.5 }; break
+          case 'items': s = { motion: () => ({ kind: 'pop', overshoot: 1.8 }), span: crowd(group.length, 1.1, 2.4), each: 0.6, sort: sweep, overlap: 0.9 }; break
+          case 'ceilings': s = { motion: () => ({ kind: 'spread' }), span: 0.6, each: 0.6 }; break
+          case 'exterior': s = { motion: () => ({ kind: 'pop', overshoot: 1.2 }), span: 0.8, each: 0.6 }; break
+          case 'roof': s = { motion: () => ({ kind: 'drop', height: 2.5 }), span: 1.1, each: 1 }; break
+        }
+        const step = s
+        group.sort(step.sort ?? ((a, b) => a.seed - b.seed))
+        stagger(group, p, p + step.span, step.each, (e, start, duration) => {
+          tracks.set(e.id, { start, duration, motion: step.motion(e), dust: step.dust })
+          floorEnd = Math.max(floorEnd, start + duration)
+        })
+        p += step.span * (step.overlap ?? 0.7)
+      }
+      end = Math.max(end, floorEnd)
+
+      // The floor develops into colour from its centre once its pieces are in.
+      const start = Math.max(extrudeStart + 0.8, floorEnd - 0.7)
+      let radius = 1.5
+      for (const x of [floorBox.min.x, floorBox.max.x]) for (const z of [floorBox.min.z, floorBox.max.z]) {
+        radius = Math.max(radius, Math.hypot(x - centre.x, z - centre.z) + 1.5)
+      }
+      const above = bottoms.slice(storey + 1).find((y) => Number.isFinite(y))
+      develop.push({
+        start, duration: 1.5, x: centre.x, z: centre.z, radius,
+        bottom: storey === 0 ? -1e4 : floorBottom - 0.05,
+        top: above !== undefined ? above - 0.01 : 1e4,
+      })
+      end = Math.max(end, start + 1.5)
+
+      // The sheet settles under its slab as the floor rises; an upper floor's goes once in colour
+      // (the ground floor's stays: the plan under the house).
+      if (paper) {
+        paper.sinkStart = extrudeStart
+        paper.sinkEnd = extrudeStart + 0.6
+        if (storey > 0) {
+          paper.fadeStart = start + 0.3
+          paper.fadeEnd = start + 1.3
+        }
+      }
+
+      // The next floor's paper comes once this one's furniture is going in.
+      t = Math.max(p, extrudeStart + 1.2)
+    }
+
+    const restStart = end + 0.1
+    const rest: [number, number] = [restStart, restStart + 1.2]
+    cameraKeys.push({ time: end - 0.6, box: set.box.clone().expandByScalar(set.radius * 0.15), polar: Math.PI * 0.32 })
     return {
       tracks,
-      duration: end + 1.4,
-      lines: { draw, fadeStart: end - 0.4, fadeEnd: end + 1.2 },
-      orbit: Math.PI / 3,
+      duration: rest[1] + 0.6,
+      noir: { papers, develop, rest },
+      cameraKeys,
+      orbit: Math.PI / 4,
     }
   },
 }

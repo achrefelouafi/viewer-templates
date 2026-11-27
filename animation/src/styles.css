@@ -161,7 +161,7 @@ body { @apply bg-background text-foreground font-sans; text-wrap: pretty; }
   box-shadow: 0 1px 3px rgb(15 23 42 / 0.25) !important;
 }
 
-/* Thin light-surface scrollbar shared across NavigatorRail, ViewPill and Inspector panels. */
+/* Thin light-surface scrollbar shared across NavigatorRail and Inspector panels. */
 .hud-scroll,
 .anim-strip {
   scrollbar-width: thin;

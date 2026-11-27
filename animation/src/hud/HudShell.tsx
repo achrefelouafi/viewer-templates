@@ -5,7 +5,6 @@ import { AnimationStudio } from './AnimationStudio'
 import { Inspector, type InspectorTabId } from './Inspector'
 import { ModeDock } from './ModeDock'
 import { NavigatorRail } from './NavigatorRail'
-import { ViewPill } from './ViewPill'
 
 const RAIL_STORAGE_KEY = 'pascal-hud:rail-collapsed'
 const TAB_STORAGE_KEY = 'pascal-hud:inspector-tab'
@@ -44,7 +43,7 @@ export type HudShellProps = {
   ready: boolean
 }
 
-/** Composes the custom Light & Airy HUD (NavigatorRail, ViewPill, ModeDock, Inspector) over the 3D/2D stage. */
+/** Composes the custom Light & Airy HUD (NavigatorRail, ModeDock, Inspector; no top breadcrumb pill) over the 3D/2D stage. */
 export function HudShell({
   projectName,
   ownerName,
@@ -105,14 +104,6 @@ export function HudShell({
     })
   }, [])
 
-  // Keep ViewPill centered inside the unobstructed top space between the left rail and right inspector.
-  const padLeftClass = hideHeader
-    ? 'md:pl-4'
-    : railCollapsed
-      ? 'md:pl-[5.5rem]'
-      : 'md:pl-[18rem]'
-  const padRightClass = inspectorOpen || animationsOpen ? 'md:pr-[22.75rem]' : 'md:pr-16'
-
   return (
     <TooltipProvider delayDuration={180}>
       {!hideHeader && (
@@ -125,12 +116,6 @@ export function HudShell({
           source={source}
         />
       )}
-
-      <ViewPill
-        padLeftClass={padLeftClass}
-        padRightClass={padRightClass}
-        source={source}
-      />
 
       <ModeDock
         animateOpen={animationsOpen}

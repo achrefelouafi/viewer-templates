@@ -40,7 +40,7 @@ import type { Object3D } from 'three'
 import { viewerFlagsFromLocation } from '../config'
 import type { SceneResponse } from '../pascal'
 import { AnimationCaption } from '../animation/AnimationCaption'
-import { BuildAnimator } from '../animation/BuildAnimator'
+import { BuildAnimator, useNoirActive } from '../animation/BuildAnimator'
 import { HudShell } from '../hud/HudShell'
 import { pluginInstallStateOf, publishedSceneSetup } from '../runtime/plugins'
 import { ErrorBoundary, SceneCrashFallback } from './ErrorBoundary'
@@ -125,6 +125,8 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
   }), [graph])
 
   const [loading, setLoading] = useState(true)
+  // The Blueprint build's Noir look: no daylight sky, so its background and grey glow show.
+  const noirLook = useNoirActive()
   const [presentedScene, setPresentedScene] = useState(false)
   const [sceneReady, setSceneReady] = useState(false)
   const [glbReady, setGlbReady] = useState(false)
@@ -271,6 +273,7 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
           >
             <ErrorBoundary fallback={<SceneCrashFallback projectName={projectName} />} key={sceneIdentity}>
               <Viewer
+                daylight={!noirLook}
                 defaultRender={{ shading: 'rendered' }}
                 onSceneReadyChange={onSceneReady}
                 presentation={glbUrl ? bakedPresentation : undefined}

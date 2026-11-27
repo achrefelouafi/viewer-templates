@@ -1,12 +1,15 @@
-import { emitter, sceneRegistry } from '@pascal-app/core'
+import { emitter, sceneRegistry, useLocale, usePascalI18n } from '@pascal-app/core'
 import { showInScene, useViewer } from '@pascal-app/viewer'
-import type { ViewerSource } from '@pascal-app/viewer/ui'
+import { localizedLevelName, type ViewerSource } from '@pascal-app/viewer/ui'
 import type { CameraControlsImpl } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { BlueprintLines, createClayMaterial, DustPool, GroundWaves, RoomFloors, SandCloud } from './effects'
 import { type BuildElement, type BuildSet, collectBuild } from './elements'
+import { clearFloorInk, floorInk, setFloorInk } from './ink'
+import { NoirLook } from './NoirLook'
+import { PaperSheet } from './paper'
 import { arrivalOf, createPose, poseAt, poseMatrix } from './poses'
 import { useAnimationStore } from './store'
 import { type Caption, type Timeline, templateById } from './templates'
@@ -41,6 +44,8 @@ type Run = {
   lines: BlueprintLines | null
   waves: GroundWaves | null
   sand: SandCloud | null
+  /** The Noir look's paper plans, one per floor. */
+  papers: PaperSheet[]
   /** Slabs that build room by room: the tiles, and the slab hidden until they are down. */
   floors: Map<string, RoomFloors>
   /** Clay: each mesh a piece owns, the time it gets its colour, and its own material. */
@@ -144,6 +149,23 @@ function applySun(run: Run, time: number) {
   useViewer.getState().setTimeOfDayMinutes(rounded)
 }
 
+const clamp01 = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t)
+const smooth = (t: number) => t * t * (3 - 2 * t)
+
+/** The Noir look at `time`: the papers' folds, and how far each floor has come into colour. */
+function applyNoir(run: Run, time: number) {
+  const noir = run.timeline.noir
+  if (!noir) return
+  for (const paper of run.papers) paper.update(time)
+  floorInk.count.value = Math.min(noir.develop.length, 16)
+  noir.develop.forEach((floor, index) => {
+    const k = clamp01((time - floor.start) / floor.duration)
+    const radius = k <= 0 ? -1 : floor.radius * (1 - (1 - k) ** 2)
+    setFloorInk(index, floor.x, floor.z, radius, floor.bottom, floor.top)
+  })
+  floorInk.rest.value = smooth(clamp01((time - noir.rest[0]) / Math.max(0.01, noir.rest[1] - noir.rest[0])))
+}
+
 function captionAt(timeline: Timeline, time: number): Caption | null {
   if (!timeline.captions) return null
   for (const caption of timeline.captions) if (time >= caption.start && time < caption.end) return caption
@@ -165,6 +187,8 @@ function restore(run: Run) {
   run.waves?.dispose()
   run.sand?.dispose()
   for (const floors of run.floors.values()) floors.dispose()
+  for (const paper of run.papers) paper.dispose()
+  if (run.timeline.noir) clearFloorInk()
   if (run.clay) {
     for (const entry of run.clay.meshes) if (entry.mesh.material === run.clay.material) entry.mesh.material = entry.own
     run.clay.material.dispose()
@@ -181,7 +205,10 @@ function restore(run: Run) {
   emitter.emit('thumbnail:after-capture', undefined as never)
 }
 
-function startRun(source: ViewerSource, scene: THREE.Scene): Run | null {
+/** A level's name as the navigator shows it ("Ground floor", "Floor 1"), for the paper's corner. */
+type LevelNamer = (levelId: string) => string | null
+
+function startRun(source: ViewerSource, scene: THREE.Scene, levelName: LevelNamer): Run | null {
   const set = collectBuild(source)
   if (!set) return null
   const template = templateById(useAnimationStore.getState().template)
@@ -255,11 +282,23 @@ function startRun(source: ViewerSource, scene: THREE.Scene): Run | null {
     clay = { material, meshes }
   }
 
+  // One paper per floor, printed with the floor's plan from the scene's own nodes.
+  const papers: PaperSheet[] = []
+  for (const plan of timeline.noir?.papers ?? []) {
+    const level = set.levels[plan.storey]
+    if (!level) continue
+    const named = levelName(plan.levelId)
+    if (named) plan.title = named
+    const paper = new PaperSheet(plan, source.nodes as unknown as Record<string, unknown>, level.object)
+    scene.add(paper.group)
+    papers.push(paper)
+  }
+
   const viewer = useViewer.getState()
   const sunBefore = timeline.sun ? { timeOfDay: viewer.timeOfDay, minutes: viewer.timeOfDayMinutes } : null
 
   return {
-    set, timeline, elements, hiddenBatches: new Set(), dust, lines, waves, sand, floors, clay, sunBefore,
+    set, timeline, elements, hiddenBatches: new Set(), dust, lines, waves, sand, papers, floors, clay, sunBefore,
     lastMinutes: -1, cameraKey: -1, caption: null,
     time: 0, clock: 0, cameraTaken: false,
   }
@@ -348,6 +387,13 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
   const status = useAnimationStore((state) => state.status)
   const sourceRef = useRef(source)
   sourceRef.current = source
+  const i18n = usePascalI18n()
+  const locale = useLocale()
+  const levelNameRef = useRef<LevelNamer>(() => null)
+  levelNameRef.current = (levelId) => {
+    const level = (sourceRef.current.nodes as unknown as Record<string, { level?: number; name?: string } | undefined>)[levelId]
+    return level ? localizedLevelName(level, i18n, locale) : null
+  }
 
   // A new run: put the last one back, measure at rest, plan, and go.
   useEffect(() => {
@@ -357,7 +403,7 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
       restore(previous)
       runRef.current = null
     }
-    const run = startRun(sourceRef.current, scene)
+    const run = startRun(sourceRef.current, scene, (id) => levelNameRef.current(id))
     if (!run) {
       useAnimationStore.setState({ status: 'idle', pieceCount: 0, duration: 0 })
       return
@@ -370,6 +416,7 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
     handBackBatches(run)
     applyClay(run, run.time)
     applySun(run, run.time)
+    applyNoir(run, run.time)
     run.sand?.update(run.time)
     if (store.cinematic && controls) {
       if (run.timeline.cameraKeys) updateCamera(run, controls, true)
@@ -383,6 +430,9 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
     if (status !== 'idle' && status !== 'finished') return
     const run = runRef.current
     if (!run) return
+    // A Noir build stays as it ended (the ground floor's plan under the house, the batches still
+    // stepped aside so everything keeps its colour) until it is stopped or played again.
+    if (status === 'finished' && run.timeline.noir) return
     restore(run)
     runRef.current = null
     invalidate()
@@ -495,6 +545,7 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
     handBackBatches(run)
     applyClay(run, run.time)
     applySun(run, run.time)
+    applyNoir(run, run.time)
     run.sand?.update(run.time)
     updateCamera(run, controls, state.cinematic)
     const caption = captionAt(run.timeline, run.time)
@@ -527,5 +578,17 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
     invalidate()
   })
 
-  return null
+  // The Noir look (the Home Assistant viewer's wireframe) for the templates that ask for it, from
+  // the moment one plays until it is stopped.
+  const noir = useNoirActive() && ready
+  return noir ? <NoirLook source={source} /> : null
+}
+
+/**
+ * Whether a build in the Noir look is on (playing, paused or finished, until stopped). The viewer
+ * turns Pascal's daylight off then, as the Home Assistant viewer does, so the sky and the day's
+ * ground give way to the Noir background and its grey glow.
+ */
+export function useNoirActive(): boolean {
+  return useAnimationStore((state) => state.status !== 'idle' && templateById(state.template).look === 'noir')
 }

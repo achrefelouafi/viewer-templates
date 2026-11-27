@@ -74,6 +74,8 @@ export type BuildSet = {
   radius: number
   groundY: number
   storeys: number
+  /** The levels from the ground up (index = storey), with their objects and names. */
+  levels: Array<{ id: string; object: THREE.Object3D; name: string }>
 }
 
 const SKIP_KINDS = new Set([
@@ -181,13 +183,13 @@ export function collectBuild(source: ViewerSource): BuildSet | null {
   const objectFor = (id: string) => source.objectFor(id) ?? sceneRegistry.nodes.get(id)
 
   // Levels bottom-up by their world height.
-  const levels: Array<{ id: string; y: number }> = []
+  const levels: Array<{ id: string; y: number; object: THREE.Object3D }> = []
   for (const [id, node] of Object.entries(nodes)) {
     if (node?.type !== 'level') continue
     const object = objectFor(id)
     if (!object) continue
     object.updateWorldMatrix(true, false)
-    levels.push({ id, y: object.matrixWorld.elements[13] ?? 0 })
+    levels.push({ id, y: object.matrixWorld.elements[13] ?? 0, object })
   }
   levels.sort((a, b) => a.y - b.y)
   const levelOrder = new Map(levels.map((level, index) => [level.id, index]))
@@ -305,6 +307,11 @@ export function collectBuild(source: ViewerSource): BuildSet | null {
     radius: Math.max(1, Math.hypot(size.x, size.z) / 2),
     groundY: all.min.y,
     storeys: Math.max(1, levels.length),
+    levels: levels.map((level, index) => ({
+      id: level.id,
+      object: level.object,
+      name: nodes[level.id]?.name?.trim() || `Level ${index + 1}`,
+    })),
   }
 }
 
