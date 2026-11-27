@@ -160,6 +160,8 @@ async function record(job: RenderJob, get: R3FGet) {
   try {
     // The video's size, in CSS pixels at the screen's pixel ratio, so the drawing buffer is the video's.
     const dpr = get().viewport.dpr || 1
+    // The camera keeps framing for the screen's shape, so Zoom and Tilt come out as they look in the viewer.
+    renderClock.aspect = previousSize.width / Math.max(1, previousSize.height)
     get().setSize(width / dpr, height / dpr, previousSize.top, previousSize.left)
     for (let i = 0; i < WARMUP_FRAMES; i++) {
       check()
@@ -268,6 +270,7 @@ async function record(job: RenderJob, get: R3FGet) {
     downloadUrl(url, name)
   } finally {
     renderClock.step = null
+    renderClock.aspect = null
     get().setSize(previousSize.width, previousSize.height, previousSize.top, previousSize.left)
     // Hand R3F's clock back where Pascal's frame loop left it: its next frame must not step backwards.
     get().clock.elapsedTime = startClock

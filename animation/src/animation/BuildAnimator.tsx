@@ -287,7 +287,9 @@ function fitDistance(controls: Controls, box: THREE.Box3): number {
   box.getBoundingSphere(_sphere)
   const camera = controls.camera as THREE.PerspectiveCamera
   const vertical = THREE.MathUtils.degToRad(camera.isPerspectiveCamera ? camera.fov : 50)
-  const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * (camera.aspect || 1))
+  // A render frames as the screen does (`renderClock.aspect`), not as the video-shaped canvas would.
+  const aspect = renderClock.aspect ?? camera.aspect ?? 1
+  const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * (aspect || 1))
   const fov = Math.min(vertical, horizontal)
   return (_sphere.radius / Math.sin(fov / 2)) * 1.05
 }
@@ -435,7 +437,8 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
       return fitDistance(controls, box.clone())
     }
     const follow = () => {
-      if (framing) return
+      // A render moves the camera as the build plays; the panel keeps the person's own Zoom and Tilt.
+      if (framing || renderClock.aspect !== null) return
       const state = useAnimationStore.getState()
       if (state.cinematic && (state.status === 'playing' || state.status === 'paused')) return
       const fit = currentFit()

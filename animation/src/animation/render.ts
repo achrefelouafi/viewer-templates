@@ -93,10 +93,13 @@ export function useRendering(): boolean {
 }
 
 /**
- * The animator's time step while a render steps the clock (seconds per frame), or null to follow
- * the wall clock as usual. Set by `FrameRecorder` around each frame it draws.
+ * What a render holds steady for the animator. `step`: the time step while a render steps the clock
+ * (seconds per frame), or null to follow the wall clock as usual; set by `FrameRecorder` around each
+ * frame it draws. `aspect`: the on-screen view's shape (width over height) for the whole render, so
+ * the camera frames the build exactly as it does on screen (the same distance and angle, so the same
+ * Zoom and Tilt) even though the canvas has the video's shape meanwhile; null when not rendering.
  */
-export const renderClock: { step: number | null } = { step: null }
+export const renderClock: { step: number | null; aspect: number | null } = { step: null, aspect: null }
 
 /** Where the dialog shows the render as it goes: the recorder draws a small copy of each frame. */
 export const renderPreview: { canvas: HTMLCanvasElement | null } = { canvas: null }
