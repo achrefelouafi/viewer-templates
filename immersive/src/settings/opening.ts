@@ -3,37 +3,33 @@ import { parseSettings } from '../pascal/settings'
 
 /**
  * The immersive viewer's settings, saved per project by its managers (listing's AGENTS.md, Viewer
- * settings): `{ v: 1, tour: { order, skip, autostart }, opening: { camera, time, levels, walls } }`.
+ * settings): `{ v: 1, tour: { order, skip, autostart }, opening: { camera, time, walls } }`.
  * The tour is the guided tour's route: the rooms' order on each floor, the rooms it skips, and
  * whether it starts by itself. The opening is how the page arrives. Pure: no viewer import, so it
  * is unit-tested in Node.
  *
- * Every field falls back on its own: a bad camera frames the house, an unknown time, level or wall
- * mode is the viewer's own. Anything else saved under `data` (another build's settings) is kept.
+ * Every field falls back on its own: a bad camera frames the house, an unknown time or wall mode is
+ * the viewer's own. Anything else saved under `data` (another build's settings) is kept.
  */
 
 export type Vec3 = [number, number, number]
 export type CameraPose = { position: Vec3; target: Vec3 }
 
 export const OPENING_TIMES = ['midday', 'golden', 'blue', 'night'] as const
-export const OPENING_LEVELS = ['stacked', 'exploded', 'solo'] as const
 export const OPENING_WALLS = ['up', 'cutaway', 'down'] as const
 
 export type OpeningTime = (typeof OPENING_TIMES)[number]
-export type OpeningLevels = (typeof OPENING_LEVELS)[number]
 export type OpeningWalls = (typeof OPENING_WALLS)[number]
 
 /** What the viewer does with nothing saved: `useViewer`'s own starting values. */
-export const VIEWER_DEFAULTS = { time: 'midday', levels: 'stacked', walls: 'up' } as const satisfies {
+export const VIEWER_DEFAULTS = { time: 'midday', walls: 'up' } as const satisfies {
   time: OpeningTime
-  levels: OpeningLevels
   walls: OpeningWalls
 }
 
 export const TIME_LABELS: Record<OpeningTime, string> = {
   midday: 'Midday', golden: 'Golden hour', blue: 'Blue hour', night: 'Night',
 }
-export const LEVEL_LABELS: Record<OpeningLevels, string> = { stacked: 'Stacked', exploded: 'Exploded', solo: 'Solo' }
 export const WALL_LABELS: Record<OpeningWalls, string> = { up: 'Full height', cutaway: 'Cutaway', down: 'Low' }
 
 const Vec3Schema = z.tuple([z.number(), z.number(), z.number()])
@@ -45,7 +41,6 @@ const CameraSchema = z.object({ position: Vec3Schema, target: Vec3Schema }).chec
 const OpeningSchema = z.object({
   camera: z.catch(z.optional(CameraSchema), undefined),
   time: z.catch(z.optional(z.enum(OPENING_TIMES)), undefined),
-  levels: z.catch(z.optional(z.enum(OPENING_LEVELS)), undefined),
   walls: z.catch(z.optional(z.enum(OPENING_WALLS)), undefined),
 })
 

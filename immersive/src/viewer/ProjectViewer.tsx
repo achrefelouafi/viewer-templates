@@ -301,7 +301,7 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision, token }: {
     }
   }, [project.id, projectName])
 
-  // The saved time of day, levels and walls, once on arrival; the visitor's own choices after.
+  // The saved time of day and walls, once on arrival; the visitor's own choices after.
   useEffect(() => {
     applyOpeningLook(arrival.opening, { glbActive: !!glbUrl })
   }, [arrival, glbUrl])
@@ -372,7 +372,6 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision, token }: {
   const tourActive = useTourLook((state) => state.active)
   // What the screen shows, on `<main>` for tests and embedders: viewer settings set these on arrival.
   const timeOfDay = useViewer((s) => (s.skyLive || s.timeOfDayMinutes !== null ? 'custom' : s.timeOfDay))
-  const levelMode = useViewer((s) => s.levelMode)
   const wallMode = useViewer((s) => s.wallMode)
   const measureActive = useMeasureStore((state) => state.active)
   const measureAllowed = !walkthroughMode && !tourActive && !vrActive && !arActive
@@ -389,7 +388,7 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision, token }: {
   return (
     <main className="relative h-screen w-full" data-guided-tour-noir={tourActive ? 'on' : undefined}
       data-measure-active={measureActive ? 'true' : undefined}
-      data-level-mode={levelMode} data-scene-ready={!showSceneLoader} data-source={glbUrl ? 'baked' : 'live'}
+      data-scene-ready={!showSceneLoader} data-source={glbUrl ? 'baked' : 'live'}
       data-stage-mode={stageMode} data-state={showSceneLoader ? 'loading' : 'ready'} data-time-of-day={timeOfDay}
       data-wall-mode={wallMode}>
       {showSceneLoader && <BrandedLoader fixed label="Preparing 3D scene" projectName={projectName} />}

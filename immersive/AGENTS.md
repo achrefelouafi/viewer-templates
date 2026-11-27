@@ -102,7 +102,7 @@ tab), the hook, the panel and its field blocks, and how to add a setting are in
 tour's route (which rooms, in which order, and whether it starts by itself) and how the page opens:
 
 ```json
-{ "v": 1, "tour": { "order": ["zone_b", "zone_a", "zone_c"], "skip": ["zone_c"], "autostart": true }, "opening": { "camera": { "position": [x, y, z], "target": [x, y, z] }, "time": "night", "levels": "exploded", "walls": "cutaway" } }
+{ "v": 1, "tour": { "order": ["zone_b", "zone_a", "zone_c"], "skip": ["zone_c"], "autostart": true }, "opening": { "camera": { "position": [x, y, z], "target": [x, y, z] }, "time": "night", "walls": "cutaway" } }
 ```
 
 - The tour's route is `tourFloors` (floors lowest first, rooms in the viewer's room-list order)
@@ -118,19 +118,19 @@ tour's route (which rooms, in which order, and whether it starts by itself) and 
   The first change writes the complete order (`moveRoom`), so a saved route always names every
   room it knew. With every room skipped the tour button is disabled for visitors.
 
-- `time` is one of the Light popover's presets (`midday`, `golden`, `blue`, `night`), `levels`
-  one of `stacked`, `exploded`, `solo`, and `walls` one of `up`, `cutaway`, `down`. Each field
+- `time` is one of the Light popover's presets (`midday`, `golden`, `blue`, `night`) and
+  `walls` one of `up`, `cutaway`, `down`. Each field
   falls back on its own (`opening.ts`): no camera frames the house as before, and a missing or
-  unknown time, levels or walls keeps what the visitor had. A dragged sun, the live sky, manual
-  levels and translucent walls are never saved.
+  unknown time or walls keeps what the visitor had. A dragged sun, the live sky and translucent
+  walls are never saved. Levels aren't a setting: the viewer always opens with its own.
 - `ProjectViewer` snapshots the settings once as the scene opens (`arrival`). The saved camera
   goes through the same `ViewerOpeningCamera` path as `?camera=`, so the loader waits for it; a
-  camera in the link wins over the saved one. Time, levels and walls are applied once on arrival
+  camera in the link wins over the saved one. Time and walls are applied once on arrival
   (`applyOpeningLook`); over a bake the walls are left alone, as the Show popover hides them there.
 - `tour.autostart` starts the guided tour once the scene is on screen (`ViewerOverlay`'s
   `autostartTour`), never in an embed, VR or AR.
 - The Customize panel's **Opening view** section (`OpeningSettings.tsx`) has **Use current
-  view**, Camera with **Use current** and **Clear**, Time of day, Levels and, live only, Walls. Choosing a time, levels or walls
+  view**, Camera with **Use current** and **Clear**, Time of day and, live only, Walls. Choosing a time or walls
   shows it on screen. The popovers change the screen, never the draft; when the screen differs
   from what Save keeps, the panel says so ("On screen now: …").
 - The tab sits in the bottom-right corner (lifted above the plan's zoom pill in 2D and split
@@ -138,7 +138,7 @@ tour's route (which rooms, in which order, and whether it starts by itself) and 
   view while customising (`styles.css` overrides the shared stylesheet's right-hand placement);
   phones keep the tab at the top left and the sheet across the bottom. Both step aside during the tour, a walkthrough, VR and AR. Colours follow the light and
   dark themes.
-- `<main>` carries `data-time-of-day`, `data-level-mode` and `data-wall-mode` for tests.
+- `<main>` carries `data-time-of-day` and `data-wall-mode` for tests.
 
 ## The loading flow
 

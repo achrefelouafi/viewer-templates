@@ -87,14 +87,13 @@ async function settingsWrites(page: Page) {
   return writes
 }
 
-test('a visitor arrives on the saved opening: camera, time of day, levels and walls, and no Customize', async ({ page }) => {
+test('a visitor arrives on the saved opening: camera, time of day and walls, and no Customize', async ({ page }) => {
   const camera = await recordCamera(page)
-  await mockPascal(page, () => ({ body: withSettings(settings({ v: 1, opening: { camera: CAMERA, time: 'night', levels: 'exploded', walls: 'cutaway' } })) }))
+  await mockPascal(page, () => ({ body: withSettings(settings({ v: 1, opening: { camera: CAMERA, time: 'night', walls: 'cutaway' } })) }))
   await page.goto(`/?project=${PROJECT}`)
   const main = page.locator(READY)
   await expect(main).toBeVisible({ timeout: 60_000 })
   await expect(main).toHaveAttribute('data-time-of-day', 'night')
-  await expect(main).toHaveAttribute('data-level-mode', 'exploded')
   await expect(main).toHaveAttribute('data-wall-mode', 'cutaway')
   await expectCameraAt(camera, CAMERA.position)
   await expect(page.getByRole('region', { name: 'Customize' })).toHaveCount(0)
@@ -141,7 +140,7 @@ test('a manager sets the opening and the tour in the panel: the screen follows a
   const panel = page.getByRole('region', { name: 'Customize' })
   await expect(panel).toBeVisible()
   const time = panel.getByRole('radiogroup', { name: 'Time of day' })
-  const levels = panel.getByRole('radiogroup', { name: 'Levels' })
+  await expect(panel.getByRole('radiogroup', { name: 'Levels' })).toHaveCount(0)
   const walls = panel.getByRole('radiogroup', { name: 'Walls' })
   await expect(time.getByRole('radio', { name: 'Default' })).toHaveAttribute('aria-checked', 'true')
   await expect(panel.getByRole('group', { name: 'Time of day' })).toContainText('Default (Midday)')
@@ -149,8 +148,6 @@ test('a manager sets the opening and the tour in the panel: the screen follows a
 
   await time.getByRole('radio', { name: 'Night' }).click()
   await expect(main).toHaveAttribute('data-time-of-day', 'night')
-  await levels.getByRole('radio', { name: 'Exploded' }).click()
-  await expect(main).toHaveAttribute('data-level-mode', 'exploded')
   await walls.getByRole('radio', { name: 'Cutaway' }).click()
   await expect(main).toHaveAttribute('data-wall-mode', 'cutaway')
   await panel.getByRole('radiogroup', { name: 'Start the guided tour on arrival' }).getByRole('radio', { name: 'On' }).click()
@@ -158,22 +155,22 @@ test('a manager sets the opening and the tour in the panel: the screen follows a
   await panel.getByRole('button', { name: 'Save' }).click()
   await expect(panel.getByRole('status')).toHaveText('Saved')
   expect(writes[0]).toEqual({ revision: 3, data: {
-    v: 1, other: true, opening: { time: 'night', levels: 'exploded', walls: 'cutaway' }, tour: { autostart: true },
+    v: 1, other: true, opening: { time: 'night', walls: 'cutaway' }, tour: { autostart: true },
   } })
 
   // "Use current view" takes the camera and the look from the screen.
-  await levels.getByRole('radio', { name: 'Solo' }).click()
+  await walls.getByRole('radio', { name: 'Low' }).click()
+  await expect(main).toHaveAttribute('data-wall-mode', 'down')
   await panel.getByRole('button', { name: 'Use current view' }).click()
   await expect(panel.getByRole('group', { name: 'Camera' })).toContainText('Custom')
   await panel.getByRole('button', { name: 'Save' }).click()
   await expect(panel.getByRole('status')).toHaveText('Saved')
   expect(writes[1]!.revision).toBe(4)
-  expect(writes[1]!.data.opening).toMatchObject({ time: 'night', levels: 'solo', walls: 'cutaway' })
+  expect(writes[1]!.data.opening).toMatchObject({ time: 'night', walls: 'down' })
   expect((writes[1]!.data.opening!.camera as { position: number[] }).position).toHaveLength(3)
 
   // Back to the defaults, field by field: nothing saved under opening or tour.
   await time.getByRole('radio', { name: 'Default' }).click()
-  await levels.getByRole('radio', { name: 'Default' }).click()
   await walls.getByRole('radio', { name: 'Default' }).click()
   await panel.getByRole('button', { name: 'Clear camera' }).click()
   await panel.getByRole('radiogroup', { name: 'Start the guided tour on arrival' }).getByRole('radio', { name: 'Off' }).click()

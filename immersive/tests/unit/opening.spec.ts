@@ -4,14 +4,18 @@ import { arrangeTour, moveRoom, parseImmersiveSettings, roundPose, toggleRoom, t
 const camera = { position: [8, 4, 6] as [number, number, number], target: [0, 1, 0] as [number, number, number] }
 
 test('saved settings parse whole', () => {
-  const data = { v: 1, opening: { camera, time: 'night', levels: 'exploded', walls: 'cutaway' }, tour: { order: ['b', 'a'], skip: ['c'], autostart: true } }
+  const data = { v: 1, opening: { camera, time: 'night', walls: 'cutaway' }, tour: { order: ['b', 'a'], skip: ['c'], autostart: true } }
   expect(parseImmersiveSettings(data)).toEqual(data)
+})
+
+test('levels are not a setting: one saved by an earlier build is dropped', () => {
+  expect(parseImmersiveSettings({ v: 1, opening: { time: 'night', levels: 'exploded' } })).toEqual({ v: 1, opening: { time: 'night' } })
 })
 
 test('each field falls back on its own', () => {
   expect(parseImmersiveSettings({
     v: 1,
-    opening: { camera: { position: [1, 2], target: [0, 0, 0] }, time: 'dusk', levels: 'manual', walls: 'translucent' },
+    opening: { camera: { position: [1, 2], target: [0, 0, 0] }, time: 'dusk', walls: 'translucent' },
     tour: { order: 'a,b', skip: [1, 2], autostart: 'yes' },
   })).toEqual({ v: 1, opening: {}, tour: {} })
   expect(parseImmersiveSettings({ v: 1, opening: { camera: { position: [0, 1, 0], target: [0, 1, 0] }, time: 'golden' } }))
@@ -28,7 +32,7 @@ test('another shape, or none, is the default settings; unknown keys survive', ()
 
 test('fields change one at a time, and nothing left removes the group', () => {
   const start = { v: 1 as const, other: true, opening: { time: 'night' as const } }
-  expect(withOpening(start, { levels: 'solo' })).toEqual({ v: 1, other: true, opening: { time: 'night', levels: 'solo' } })
+  expect(withOpening(start, { walls: 'down' })).toEqual({ v: 1, other: true, opening: { time: 'night', walls: 'down' } })
   expect(withOpening(start, { time: undefined })).toEqual({ v: 1, other: true })
   expect(withTour(start, { autostart: true })).toEqual({ ...start, tour: { autostart: true } })
   expect(withTour({ v: 1, tour: { autostart: true } }, { autostart: undefined })).toEqual({ v: 1 })

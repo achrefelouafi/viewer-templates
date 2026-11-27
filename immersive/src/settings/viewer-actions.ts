@@ -5,10 +5,8 @@ import { useEffect } from 'react'
 import { Vector3 } from 'three'
 import {
   type CameraPose,
-  OPENING_LEVELS,
   OPENING_TIMES,
   OPENING_WALLS,
-  type OpeningLevels,
   type OpeningTime,
   type OpeningWalls,
   type SavedOpening,
@@ -23,23 +21,18 @@ export function showTime(time: OpeningTime) {
   viewer.setTimeOfDay(time)
 }
 
-export function showLevels(levels: OpeningLevels) {
-  useViewer.getState().setLevelMode(levels)
-}
-
 export function showWalls(walls: OpeningWalls) {
   useViewer.getState().setWallMode(walls)
 }
 
 /**
- * Puts a saved opening's time, levels and walls on screen; fields not saved keep what the visitor
+ * Puts a saved opening's time and walls on screen; fields not saved keep what the visitor
  * had. Walls only where they are drawn live: a bake keeps its own walls (the Show popover hides
  * the choice there too). The camera goes through `ViewerOpeningCamera`, behind the loader.
  */
 export function applyOpeningLook(opening: SavedOpening | undefined, { glbActive }: { glbActive: boolean }) {
   if (!opening) return
   if (opening.time) showTime(opening.time)
-  if (opening.levels) showLevels(opening.levels)
   if (opening.walls && !glbActive) showWalls(opening.walls)
 }
 
@@ -48,19 +41,17 @@ const includes = <T extends string>(list: readonly T[], value: unknown): value i
 
 /**
  * What the screen shows now, in the settings' terms; null where it is something the settings
- * can't hold (a dragged sun or the live sky, manual levels, translucent walls).
+ * can't hold (a dragged sun or the live sky, translucent walls).
  */
 export function screenLook(view: {
   timeOfDay: string
   timeOfDayMinutes: number | null
   skyLive: boolean
-  levelMode: string
   wallMode: string
-}): { time: OpeningTime | null; levels: OpeningLevels | null; walls: OpeningWalls | null } {
+}): { time: OpeningTime | null; walls: OpeningWalls | null } {
   const presetTime = !view.skyLive && view.timeOfDayMinutes === null
   return {
     time: presetTime && includes(OPENING_TIMES, view.timeOfDay) ? view.timeOfDay : null,
-    levels: includes(OPENING_LEVELS, view.levelMode) ? view.levelMode : null,
     walls: includes(OPENING_WALLS, view.wallMode) ? view.wallMode : null,
   }
 }
