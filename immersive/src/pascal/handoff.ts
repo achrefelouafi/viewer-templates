@@ -14,6 +14,11 @@ export type Transaction = {
   returnPath: string
   renewal?: boolean
   signIn?: boolean
+  /**
+   * Re-authorizes a session the tab held until Pascal rejected it before its expiry (revoked, the
+   * binding changed, the parent session ended); session access only, never a sign-in.
+   */
+  recovery?: boolean
 }
 export type Credential = {
   access_token: string
@@ -35,10 +40,26 @@ export class ReopenRequired extends Error {
   }
 }
 
+/**
+ * Pascal refused a validated callback. `reauthorizes`: the transaction was a recovery or renewal
+ * of a session this tab held; `returnPath` its validated return address.
+ */
 export class SignInRefused extends Error {
-  constructor() {
+  constructor(readonly reauthorizes = false, readonly returnPath: string | null = null) {
     super("This account can't open this project")
     this.name = 'SignInRefused'
+  }
+}
+
+/**
+ * A validated callback whose exchange gave no usable credential. Only this, never an invalid or
+ * tampered callback, may lead a session this tab held to the public view. `returnPath`: the
+ * transaction's validated return address.
+ */
+export class ExchangeFailed extends ReopenRequired {
+  constructor(access: AccessMode, readonly reauthorizes: boolean, readonly returnPath: string) {
+    super(access)
+    this.name = 'ExchangeFailed'
   }
 }
 
@@ -54,6 +75,44 @@ export const credentialKey = (issuer: string, viewer: string, project: string) =
   `pascal:credential:${JSON.stringify([issuer, viewer, project, location.origin])}`
 const reopenKey = (issuer: string, viewer: string, project: string) =>
   `pascal:reopen:${JSON.stringify([issuer, viewer, project, location.origin])}`
+const recoveryKey = (issuer: string, viewer: string, project: string) =>
+  `pascal:recovery:${JSON.stringify([issuer, viewer, project, location.origin])}`
+
+/**
+ * A session credential this tab held that Pascal rejected, and whether the tab's one recovery round
+ * trip has been taken (`spent`). Kept in `sessionStorage`, so navigation, reloads and repeated
+ * failures see it; only a successful credentialed read clears it.
+ */
+export type Recovery = { spent: boolean }
+
+/** Unreadable or malformed counts as spent: no automatic trip without a budget that survives it. */
+export function readRecovery(issuer: string, viewer: string, project: string): Recovery | null {
+  try {
+    const stored = sessionStorage.getItem(recoveryKey(issuer, viewer, project))
+    if (stored === null) return null
+    const value = JSON.parse(stored) as Partial<Recovery> | null
+    return { spent: value?.spent !== false }
+  } catch {
+    return { spent: true }
+  }
+}
+
+/** False when storage can't hold it: then there is no budget to spend. */
+export function writeRecovery(issuer: string, viewer: string, project: string, recovery: Recovery): boolean {
+  try {
+    const key = recoveryKey(issuer, viewer, project)
+    sessionStorage.setItem(key, JSON.stringify(recovery))
+    return sessionStorage.getItem(key) === JSON.stringify(recovery)
+  } catch {
+    return false
+  }
+}
+
+export function clearRecovery(issuer: string, viewer: string, project: string): void {
+  try { sessionStorage.removeItem(recoveryKey(issuer, viewer, project)) } catch {
+    // Storage denied: nothing was kept.
+  }
+}
 
 function readStored(key: string): unknown {
   try {
@@ -72,6 +131,8 @@ export function readTransaction(issuer: string): Transaction | null {
     !['session', 'share'].includes(value.access || '') ||
     typeof value.createdAt !== 'number' || typeof value.returnPath !== 'string' ||
     typeof value.redirect_uri !== 'string' ||
+    (value.recovery !== undefined && (value.recovery !== true || value.access !== 'session' ||
+      value.signIn === true || value.renewal === true)) ||
     !/^[A-Za-z0-9_-]{43}$/.test(value.state || '') ||
     !/^[A-Za-z0-9_-]{43}$/.test(value.verifier || '')
   ) throw new ReopenRequired()
@@ -135,9 +196,12 @@ function base64url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
+/** `recovery`: replaces a session credential Pascal rejected before its expiry, in the same mode. */
 export async function startAuthorize(
   issuer: string, descriptor: Descriptor, project: string, access: AccessMode, renewal = false, signIn = false,
+  recovery = false,
 ): Promise<void> {
+  if (recovery && (access !== 'session' || signIn || renewal)) throw new ReopenRequired(access)
   const state = base64url(crypto.getRandomValues(new Uint8Array(32)))
   const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)))
   const challenge = base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))))
@@ -151,6 +215,7 @@ export async function startAuthorize(
     verifier, state, issuer, viewer: descriptor.viewer_id, project,
     redirect_uri: descriptor.redirect_uri, access, createdAt: Date.now(),
     returnPath: localReturnPath(returnUrl.pathname + returnUrl.search + returnUrl.hash), renewal, signIn,
+    ...(recovery ? { recovery } : {}),
   }
   sessionStorage.setItem(transactionKey(issuer), JSON.stringify(transaction))
   const url = new URL('/viewer/authorize', issuer)
@@ -201,6 +266,7 @@ export async function exchangeCallback(
   issuer: string, project: string, descriptor: Descriptor | null,
 ): Promise<StoredCredential> {
   let access: AccessMode = 'session'
+  let validated: { returnPath: string; reauthorizes: boolean } | null = null
   try {
     let transaction: Transaction | null
     try { transaction = readTransaction(issuer) } finally {
@@ -230,9 +296,11 @@ export async function exchangeCallback(
         : returnQuery.get('project') !== project || returnQuery.get('viewer') !== transaction.viewer ||
           returnQuery.get('access') !== access)
     ) throw new ReopenRequired(access)
+    const reauthorizes = access === 'session' && (transaction.recovery === true || transaction.renewal === true)
+    validated = { returnPath, reauthorizes }
     if (callback.error !== null) {
       history.replaceState(history.state, '', returnPath)
-      throw new SignInRefused()
+      throw new SignInRefused(reauthorizes, returnPath)
     }
     const response = await fetch(new URL('/api/viewer-handoff/exchange', issuer), {
       method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
@@ -245,7 +313,7 @@ export async function exchangeCallback(
       body.token_type !== 'Bearer' || body.revision !== 'published' ||
       typeof body.expires_at !== 'string' || !Number.isFinite(Date.parse(body.expires_at)) ||
       Date.parse(body.expires_at) <= Date.now()
-    ) throw new ReopenRequired(access)
+    ) throw new ExchangeFailed(access, reauthorizes, returnPath)
     const credential: StoredCredential = {
       access_token: body.access_token, expires_at: body.expires_at!,
       project_id: project, viewer_id: transaction.viewer, issuer, origin: location.origin, access,
@@ -255,7 +323,9 @@ export async function exchangeCallback(
     history.replaceState(history.state, '', returnPath)
     return credential
   } catch (error) {
-    if (error instanceof SignInRefused) throw error
+    if (error instanceof SignInRefused || error instanceof ExchangeFailed) throw error
+    // The callback was validated but the exchange never answered usably (network, a non-JSON body).
+    if (validated) throw new ExchangeFailed(access, validated.reauthorizes, validated.returnPath)
     throw new ReopenRequired(access)
   }
 }

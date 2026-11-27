@@ -143,10 +143,42 @@ The helper captures and immediately scrubs callback `code`, `error`, `error_desc
 
 Access resolves in order: callback, matching unexpired tab credential, private entry authorization,
 then anonymous published read. Direct links without private entry context can read public projects.
-If descriptor discovery is unavailable, only public projects work. An invalid callback or a
-rejected credential stops loading and shows “Reopen from Pascal” or “Reopen your share link”;
-it never silently retries anonymously. Share readers should reopen their original Pascal share
-link; the helper never stores or reconstructs that durable link.
+If descriptor discovery is unavailable, only public projects work. An invalid callback stops
+loading and shows “Reopen from Pascal” or “Reopen your share link”. Share readers should reopen
+their original Pascal share link; the helper never stores or reconstructs that durable link.
+
+A session credential Pascal rejects before its expiry (the owner revoked it from the Share
+popover, the binding changed, the parent session ended) is recorded per tab, issuer, viewer,
+project and origin in `sessionStorage` (`pascal:recovery:`, with the Customize intent and whether
+the round trip is spent), and settled:
+
+- **One round trip, same mode.** A fresh top-level PKCE authorize, never reusing the rejected
+  token. A configure credential asks for `scope=configure` again at once (the configure path,
+  which also lets the visitor sign in; Pascal allows it on public projects). A reader's session
+  only after an independent tokenless read of the published scene says the project is
+  *definitively* not public (404, 401 or 403), because Pascal refuses non-configure session
+  authorizes on public projects with its own refusal page.
+- **Indeterminate probe.** Offline, 5xx, 429 or an answer the client doesn't understand: neither a
+  round trip nor the public view, but the read's `PascalError`, shown as a retryable error. A
+  retry or a reload settles again from the record.
+- **No loops.** The record outlives navigation, reloads and repeated failures. While it exists, a
+  reload or re-entry (a session entry, no entry, or the `configure=available` hint) never starts an
+  automatic authorize: it settles again, to the public view, "Reopen from Pascal" or the
+  retryable error. Explicit sign-in and Customize buttons still start a new transaction. Only a
+  successful credentialed read clears the record.
+- **Public fallback.** When the session can't be restored (no round trip left, the replacement
+  rejected too, or Pascal refusing a validated recovery or renewal callback, or its exchange
+  failing or not granting configure), a project the tokenless read shows is public and published
+  opens its public view, read-only, on its anonymous address: the current address, or for a
+  callback the transaction's validated return path, without `viewer`, `access`, `configure` and
+  callback parameters (other parameters and the hash kept). The Customize tab says it needs
+  reopening (`customizeNeedsReopen`). Invalid or tampered callbacks (wrong state, issuer, code or
+  age) never fall back: they show "Reopen from Pascal" as before.
+- **Private and unpublished projects** never fall back: they show "Reopen from Pascal", whose
+  button restarts Customize when the visitor was customising (`ReopenRequired.configure`,
+  `signIn(projectId, baseUrl, { configure: true })`).
+
+Share credentials are not recovered and never fall back.
 
 Credentials are isolated by Pascal issuer, viewer, project, and browser origin in `sessionStorage`.
 Never store tokens in `localStorage`, query parameters, build variables, or deployment secrets.
@@ -157,7 +189,7 @@ third-party scripts or analytics you add, and exclude callback queries and crede
 Within two minutes of expiry, the helper renews using a fresh top-level authorization round trip
 with the original session/share mode. An expired credential rejected with 401 can also renew.
 There is one renewal attempt with a loop guard; failed or immediately expiring renewals require
-reopening from Pascal. There is no refresh token or hidden iframe. A successful read with a
+reopening from Pascal (or, for a session on a public project, show its public view as above). There is no refresh token or hidden iframe. A successful read with a
 fresh credential permits a later renewal cycle. Signed storage URL renewal remains separate:
 storage downloads omit cookies and never receive the Pascal bearer credential.
 

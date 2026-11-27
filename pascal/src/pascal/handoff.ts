@@ -34,6 +34,11 @@ export type Transaction = {
    */
   customize?: boolean
   fallbackPath?: string
+  /**
+   * Re-authorizes a session the tab held until Pascal rejected it before its expiry (revoked, the
+   * binding changed, the parent session ended); session access only, never a sign-in or Customize.
+   */
+  recovery?: boolean
 }
 export type Credential = {
   access_token: string
@@ -50,17 +55,34 @@ export type StoredCredential = Credential & {
   configure?: boolean
 }
 
+/** `configure`: the visitor was customising; reopening restarts Customize, not a plain sign-in. */
 export class ReopenRequired extends Error {
-  constructor(readonly access: AccessMode = 'session') {
+  constructor(readonly access: AccessMode = 'session', readonly configure = false) {
     super(access === 'share' ? 'Reopen your share link' : 'Reopen from Pascal')
     this.name = 'ReopenRequired'
   }
 }
 
+/**
+ * Pascal refused a validated callback. `reauthorizes`: the transaction was a recovery or renewal
+ * of a session this tab held; `returnPath` its validated return address.
+ */
 export class SignInRefused extends Error {
-  constructor() {
+  constructor(readonly reauthorizes = false, readonly configure = false, readonly returnPath: string | null = null) {
     super("This account can't open this project")
     this.name = 'SignInRefused'
+  }
+}
+
+/**
+ * A validated callback whose exchange gave no usable credential (it failed, or Customize was asked
+ * for and not granted). Only this, never an invalid or tampered callback, may lead a session this
+ * tab held to the public view. `returnPath`: the transaction's validated return address.
+ */
+export class ExchangeFailed extends ReopenRequired {
+  constructor(access: AccessMode, configure: boolean, readonly reauthorizes: boolean, readonly returnPath: string) {
+    super(access, configure)
+    this.name = 'ExchangeFailed'
   }
 }
 
@@ -87,6 +109,45 @@ const reopenKey = (issuer: string, viewer: string, project: string) =>
 /** One viewer per origin, so issuer and project name it. */
 const customizeRefusedKey = (issuer: string, project: string) =>
   `pascal:customize-refused:${JSON.stringify([issuer, project, location.origin])}`
+const recoveryKey = (issuer: string, viewer: string, project: string) =>
+  `pascal:recovery:${JSON.stringify([issuer, viewer, project, location.origin])}`
+
+/**
+ * A session credential this tab held that Pascal rejected, and what became of it: `configure`, the
+ * visitor was customising; `spent`, the tab's one recovery round trip has been taken. Kept in
+ * `sessionStorage`, so navigation, reloads and repeated failures see it; only a successful
+ * credentialed read clears it.
+ */
+export type Recovery = { configure: boolean; spent: boolean }
+
+/** Unreadable or malformed counts as spent: no automatic trip without a budget that survives it. */
+export function readRecovery(issuer: string, viewer: string, project: string): Recovery | null {
+  try {
+    const stored = sessionStorage.getItem(recoveryKey(issuer, viewer, project))
+    if (stored === null) return null
+    const value = JSON.parse(stored) as Partial<Recovery> | null
+    return { configure: value?.configure === true, spent: value?.spent !== false }
+  } catch {
+    return { configure: false, spent: true }
+  }
+}
+
+/** False when storage can't hold it: then there is no budget to spend. */
+export function writeRecovery(issuer: string, viewer: string, project: string, recovery: Recovery): boolean {
+  try {
+    const key = recoveryKey(issuer, viewer, project)
+    sessionStorage.setItem(key, JSON.stringify(recovery))
+    return sessionStorage.getItem(key) === JSON.stringify(recovery)
+  } catch {
+    return false
+  }
+}
+
+export function clearRecovery(issuer: string, viewer: string, project: string): void {
+  try { sessionStorage.removeItem(recoveryKey(issuer, viewer, project)) } catch {
+    // Storage denied: nothing was kept.
+  }
+}
 
 /** Pascal refused Customize from inside the viewer in this tab: the entry stays hidden until the tab closes. */
 export function customizeWasRefused(issuer: string, project: string): boolean {
@@ -122,6 +183,8 @@ export function readTransaction(issuer: string): Transaction | null {
     (value.configure !== undefined && (typeof value.configure !== 'boolean' || (value.configure && value.access !== 'session'))) ||
     (value.customize !== undefined && (value.customize !== true || value.configure !== true || typeof value.fallbackPath !== 'string')) ||
     (value.customize === undefined && value.fallbackPath !== undefined) ||
+    (value.recovery !== undefined && (value.recovery !== true || value.access !== 'session' ||
+      value.signIn === true || value.renewal === true || value.customize !== undefined)) ||
     !/^[A-Za-z0-9_-]{43}$/.test(value.state || '') ||
     !/^[A-Za-z0-9_-]{43}$/.test(value.verifier || '')
   ) throw new ReopenRequired()
@@ -222,18 +285,22 @@ export function handoffNavigating(): boolean {
  * Only Pascal's Customize link (`configure=1`) comes back to a `configure=1` address. Every other
  * configure pass (from inside the viewer, or renewing one) comes back to the page it left: same
  * address and `access`, without the hint it has used, so the address stays one a visitor can open.
+ *
+ * `recovery`: replaces a session credential Pascal rejected before its expiry, in the same mode
+ * (a configure credential through the configure path, which also lets the visitor sign in).
  */
 export async function startAuthorize(
   issuer: string, descriptor: Descriptor, project: string, access: AccessMode, renewal = false, signIn = false,
-  configure = false, customize = false,
+  configure = false, customize = false, recovery = false,
 ): Promise<void> {
-  if (configure && (access !== 'session' || signIn)) throw new ReopenRequired(access)
-  if (customize && (!configure || renewal)) throw new ReopenRequired(access)
+  if (configure && (access !== 'session' || signIn)) throw new ReopenRequired(access, configure)
+  if (customize && (!configure || renewal)) throw new ReopenRequired(access, configure)
+  if (recovery && (access !== 'session' || signIn || renewal || customize)) throw new ReopenRequired(access, configure)
   const state = base64url(crypto.getRandomValues(new Uint8Array(32)))
   const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)))
   const challenge = base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))))
   const here = localReturnPath(location.pathname + location.search + location.hash)
-  if (customize && !hintOnly(new URL(here, location.origin).searchParams)) throw new ReopenRequired(access)
+  if (customize && !hintOnly(new URL(here, location.origin).searchParams)) throw new ReopenRequired(access, configure)
   const returnUrl = new URL(location.href)
   const asked = returnUrl.searchParams.getAll('configure')
   const inPlace = configure && !(asked.length === 1 && asked[0] === '1')
@@ -254,6 +321,7 @@ export async function startAuthorize(
     returnPath: localReturnPath(returnUrl.pathname + returnUrl.search + returnUrl.hash), renewal, signIn,
     ...(configure ? { configure } : {}),
     ...(customize ? { customize, fallbackPath: here } : {}),
+    ...(recovery ? { recovery } : {}),
   }
   sessionStorage.setItem(transactionKey(issuer), JSON.stringify(transaction))
   const url = new URL('/viewer/authorize', issuer)
@@ -307,14 +375,19 @@ export async function exchangeCallback(
   issuer: string, project: string, descriptor: Descriptor | null,
 ): Promise<StoredCredential> {
   let access: AccessMode = 'session'
+  let configure = false
+  let validated: { returnPath: string; reauthorizes: boolean } | null = null
   try {
     let transaction: Transaction | null
     try { transaction = readTransaction(issuer) } finally {
       // A lost response or invalid transaction requires a new handoff.
       sessionStorage.removeItem(transactionKey(issuer))
     }
-    if (transaction) access = transaction.access
-    if (!callback || !transaction || !descriptor) throw new ReopenRequired(access)
+    if (transaction) {
+      access = transaction.access
+      configure = transaction.configure === true
+    }
+    if (!callback || !transaction || !descriptor) throw new ReopenRequired(access, configure)
     const age = Date.now() - transaction.createdAt
     const entry = detectEntry()
     const returnPath = localReturnPath(transaction.returnPath)
@@ -348,6 +421,8 @@ export async function exchangeCallback(
       // The view the pass was asked from: this project, this viewer, and not itself configure mode.
       (fallbackQuery !== null && (!hintOnly(fallbackQuery) || !thisPage(fallbackQuery, project, transaction.viewer)))
     ) throw new ReopenRequired(access)
+    const reauthorizes = access === 'session' && (transaction.recovery === true || transaction.renewal === true)
+    validated = { returnPath, reauthorizes }
     if (callback.error !== null) {
       if (fallbackPath !== null) {
         // The pass asked for from inside the viewer was refused (a forged hint, a demoted manager):
@@ -357,7 +432,7 @@ export async function exchangeCallback(
         throw new CustomizeRefused()
       }
       history.replaceState(history.state, '', returnPath)
-      throw new SignInRefused()
+      throw new SignInRefused(reauthorizes, configure, returnPath)
     }
     const response = await fetch(new URL('/api/viewer-handoff/exchange', issuer), {
       method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
@@ -370,11 +445,11 @@ export async function exchangeCallback(
       body.token_type !== 'Bearer' || body.revision !== 'published' ||
       typeof body.expires_at !== 'string' || !Number.isFinite(Date.parse(body.expires_at)) ||
       Date.parse(body.expires_at) <= Date.now()
-    ) throw new ReopenRequired(access)
+    ) throw new ExchangeFailed(access, configure, reauthorizes, returnPath)
     // Asked for configure and not granted it: never silently continue as a reader. From inside the
     // viewer that is a refusal (the credential is dropped); a Customize link from Pascal reopens.
     if (transaction.configure === true && body.scope !== 'configure') {
-      if (fallbackPath === null) throw new ReopenRequired(access)
+      if (fallbackPath === null) throw new ExchangeFailed(access, configure, reauthorizes, returnPath)
       history.replaceState(history.state, '', fallbackPath)
       rememberCustomize(issuer, project, true)
       throw new CustomizeRefused()
@@ -390,7 +465,9 @@ export async function exchangeCallback(
     history.replaceState(history.state, '', returnPath)
     return credential
   } catch (error) {
-    if (error instanceof SignInRefused || error instanceof CustomizeRefused) throw error
-    throw new ReopenRequired(access)
+    if (error instanceof SignInRefused || error instanceof CustomizeRefused || error instanceof ExchangeFailed) throw error
+    // The callback was validated but the exchange never answered usably (network, a non-JSON body).
+    if (validated) throw new ExchangeFailed(access, configure, validated.reauthorizes, validated.returnPath)
+    throw new ReopenRequired(access, configure)
   }
 }
