@@ -40,12 +40,10 @@ import type { Object3D } from 'three'
 import { viewerFlagsFromLocation } from '../config'
 import type { SceneResponse } from '../pascal'
 import { AnimationCaption } from '../animation/AnimationCaption'
-import { AnimationsTab } from '../animation/AnimationsTab'
 import { BuildAnimator } from '../animation/BuildAnimator'
+import { HudShell } from '../hud/HudShell'
 import { pluginInstallStateOf, publishedSceneSetup } from '../runtime/plugins'
-import { ErrorBoundary } from './ErrorBoundary'
-import { GuestPrompt } from './GuestPrompt'
-import { ViewerOverlay } from './ViewerOverlay'
+import { ErrorBoundary, SceneCrashFallback } from './ErrorBoundary'
 
 /**
  * Pascal's hosted viewer (editor.pascal.app/viewer/<id>), assembled from the public packages.
@@ -94,27 +92,6 @@ function ParametricWalkthroughHud() {
       suspended={suspended}
       zoneLabel={zoneLabel}
     />
-  )
-}
-
-function ViewerSceneCrashFallback({ projectName }: { projectName: string | null }) {
-  return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/95 p-4 text-foreground">
-      <div className="corner-smooth w-full max-w-md rounded-2xl border border-border/60 bg-background p-6 shadow-elevation-5">
-        <h2 className="font-semibold text-lg">The 3D scene failed to render</h2>
-        <p className="mt-2 text-muted-foreground text-sm">
-          {projectName ? `"${projectName}" ` : ''}
-          hit a rendering error.
-        </p>
-        <button
-          className="mt-4 rounded-full border border-border bg-accent px-4 py-2 font-medium text-sm hover:bg-accent/80"
-          onClick={() => window.location.reload()}
-          type="button"
-        >
-          Reload scene
-        </button>
-      </div>
-    </div>
   )
 }
 
@@ -262,25 +239,23 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
 
       {!loading && (
         <>
-          {/* Embed: header (name, breadcrumb, levels), controls bar and switcher; no owner
-              line and no guest prompt. */}
-          <ViewerOverlay
+          {/* Custom Light & Airy HUD built over Pascal's stores and selection helpers. */}
+          <HudShell
+            embed={flags.embed}
             glbActive={!!glbUrl}
             glbHasGuides={glbReference.some((n) => n.type === 'guide')}
             glbHasScans={glbReference.some((n) => n.type === 'scan')}
-            hideBottomBar={flags.hideBottomBar || stageMode !== '3d'}
+            hasFloorplan={hasFloorplan}
+            hideBottomBar={flags.hideBottomBar}
             hideHeader={hideHeader}
+            onStageModeChange={handleStageModeChange}
             ownerName={flags.embed ? null : project.owner?.displayName ?? null}
             projectName={projectName}
+            ready={!showSceneLoader}
             source={viewerSource}
+            stageMode={stageMode}
           />
-          {flags.embed ? null : <GuestPrompt />}
-
-          {/* The one addition to the default viewer: the Animations tab on the right edge. */}
           {stageMode !== '2d' && <AnimationCaption />}
-          {stageMode !== '2d' && (
-            <AnimationsTab ready={!showSceneLoader} />
-          )}
 
           <ViewerStage
             className="absolute inset-0"
@@ -292,10 +267,9 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
             scene={floorplanScene}
             showCompass={hasFloorplan}
             showLevelSelector={hasFloorplan}
-            showSwitcher={hasFloorplan}
-            switcherClassName={`${showSceneLoader ? 'z-[110]' : 'z-30'} ${hideHeader ? 'top-4' : 'top-28 md:top-4'}`}
+            showSwitcher={false}
           >
-            <ErrorBoundary fallback={<ViewerSceneCrashFallback projectName={projectName} />} key={sceneIdentity}>
+            <ErrorBoundary fallback={<SceneCrashFallback projectName={projectName} />} key={sceneIdentity}>
               <Viewer
                 defaultRender={{ shading: 'rendered' }}
                 onSceneReadyChange={onSceneReady}

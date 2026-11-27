@@ -1,16 +1,35 @@
 import { useViewer } from '@pascal-app/viewer'
-import { Camera, ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Sparkles, Square } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Camera, Pause, Play, RotateCcw, Sparkles, Square } from 'lucide-react'
+import { type CSSProperties, type ReactNode, useEffect } from 'react'
 import { useAnimationStore } from './store'
 import { type AnimationTemplate, TEMPLATES, type TemplateId } from './templates'
 
 /**
- * The Animations tab, docked on the right edge: it folds to a slim tab (title, play, replay and a
- * progress line) and opens into the template grid, the scrubber, the transport, speed and the
- * cinematic camera switch. Everything else on screen is the default viewer, unchanged.
+ * Build animation controls rendered inside the Inspector's Animate tab, plus the lifecycle hook
+ * (`useAnimationLifecycle`) that keeps walkthrough handoff and `?animation=<template>` active
+ * even while the Inspector drawer is closed.
  */
 
 const SPEEDS = [0.5, 1, 2] as const
+
+/** Keeps walkthrough stop-on-enter and `?animation=<template>` autoplay active at the HUD root. */
+export function useAnimationLifecycle(ready: boolean) {
+  const status = useAnimationStore((s) => s.status)
+  const walkthrough = useViewer((s) => s.walkthroughMode)
+  const running = status === 'playing' || status === 'paused'
+
+  // A walkthrough owns the screen and the camera: a build in progress steps aside.
+  useEffect(() => {
+    if (walkthrough && running) useAnimationStore.getState().stop()
+  }, [walkthrough, running])
+
+  // `?animation=<template>` plays that template once the scene is ready (handy for embeds).
+  useEffect(() => {
+    if (!ready) return
+    const wanted = new URLSearchParams(window.location.search).get('animation') as TemplateId | null
+    if (wanted && TEMPLATES.some((t) => t.id === wanted)) useAnimationStore.getState().select(wanted)
+  }, [ready])
+}
 
 /** A tiny looping picture of each template, drawn in the card. */
 function TemplateGlyph({ id, accent }: { id: TemplateId; accent: string }) {
@@ -75,7 +94,7 @@ function TemplateGlyph({ id, accent }: { id: TemplateId; accent: string }) {
     case 'clay':
       return (
         <svg aria-hidden className="anim-glyph" viewBox="0 0 40 28">
-          <path d="M10 24 V14 L20 6 L30 14 V24 Z" fill="#f1ede6" />
+          <path d="M10 24 V14 L20 6 L30 14 V24 Z" fill="#ebe7df" stroke="#b9b2a5" strokeLinejoin="round" strokeWidth="1.1" />
           <path className="anim-paint" d="M10 24 V14 L20 6 L30 14 V24 Z" fill={accent} />
         </svg>
       )
@@ -98,23 +117,47 @@ function TemplateGlyph({ id, accent }: { id: TemplateId; accent: string }) {
   }
 }
 
+function glyphInk(accent: string) {
+  return `color-mix(in oklab, ${accent} 76%, #0f172a)`
+}
+
 function TemplateCard({ template, active, onPick }: { template: AnimationTemplate; active: boolean; onPick: () => void }) {
+  const ink = glyphInk(template.accent)
+  const activeStyle: CSSProperties | undefined = active
+    ? {
+        background: 'color-mix(in oklab, var(--glass-accent) 7%, #ffffff)',
+        borderColor: 'var(--glass-accent-border)',
+        boxShadow: '0 1px 3px rgb(38 73 196 / 0.12)',
+      }
+    : undefined
   return (
     <button
       aria-pressed={active}
-      className={`anim-card flex items-center gap-2 rounded-xl border p-1.5 text-left transition-all ${
-        active ? 'border-transparent bg-accent' : 'border-border/60 bg-background/40 hover:bg-accent/60'
+      className={`anim-card studio-interactive group flex min-h-[48px] items-center gap-2 rounded-xl border p-1.5 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] active:scale-[0.98] ${
+        active
+          ? 'text-[var(--glass-ink)]'
+          : 'border-[var(--glass-border)] bg-white/70 text-[var(--glass-ink)]/90 hover:border-[var(--glass-border-strong)] hover:bg-white hover:text-[var(--glass-ink)]'
       }`}
       data-template={template.id}
       onClick={onPick}
-      style={active ? { boxShadow: `inset 0 0 0 1.5px ${template.accent}` } : undefined}
+      style={activeStyle}
       title={template.tagline}
       type="button"
     >
-      <span className="flex h-8 w-11 shrink-0 items-center justify-center rounded-lg" style={{ background: `${template.accent}1f` }}>
-        <TemplateGlyph accent={template.accent} id={template.id} />
+      <span
+        className="flex h-8 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors"
+        style={{
+          color: ink,
+          background: `color-mix(in oklab, ${template.accent} ${active ? 18 : 11}%, #f5f7fb)`,
+          borderColor: `color-mix(in oklab, ${template.accent} ${active ? 32 : 18}%, rgb(15 23 42 / 0.08))`,
+        }}
+      >
+        <TemplateGlyph accent="currentColor" id={template.id} />
       </span>
-      <span className="min-w-0 truncate font-medium text-[12px] leading-tight">{template.name}</span>
+      <span className={`min-w-0 flex-1 truncate text-xs leading-tight tracking-[-0.005em] ${active ? 'font-semibold' : 'font-medium'}`}>
+        {template.name}
+      </span>
+      {active && <span aria-hidden className="mr-0.5 size-1.5 shrink-0 rounded-full bg-[var(--glass-accent)]" />}
     </button>
   )
 }
@@ -123,16 +166,21 @@ function formatTime(seconds: number) {
   return `${seconds.toFixed(1)}s`
 }
 
-function IconButton({ label, onClick, children, disabled }: {
+function IconButton({ label, onClick, children, disabled, primary = false }: {
   label: string
   onClick: () => void
-  children: React.ReactNode
+  children: ReactNode
   disabled?: boolean
+  primary?: boolean
 }) {
+  const sizeClass = primary ? 'size-9' : 'size-8'
+  const toneClass = primary
+    ? 'bg-[var(--glass-ink)] text-white shadow-sm hover:bg-[#252932]'
+    : 'text-[var(--glass-ink)]/80 hover:bg-[var(--glass-bg-hover)] hover:text-[var(--glass-ink)]'
   return (
     <button
       aria-label={label}
-      className="flex size-8 shrink-0 items-center justify-center rounded-full text-foreground transition-colors hover:bg-accent disabled:opacity-40"
+      className={`studio-interactive flex ${sizeClass} shrink-0 items-center justify-center rounded-full transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] active:scale-95 disabled:pointer-events-none disabled:opacity-40 ${toneClass}`}
       disabled={disabled}
       onClick={onClick}
       title={label}
@@ -143,11 +191,11 @@ function IconButton({ label, onClick, children, disabled }: {
   )
 }
 
-export function AnimationsTab({ ready }: {
+/** Build animation templates, camera framing sliders, and timeline transport for the Inspector's Animate tab. */
+export function AnimationsPanel({ ready }: {
   /** The scene is on screen: the build can be measured. */
   ready: boolean
 }) {
-  const [open, setOpen] = useState(() => useAnimationStore.getState().panelOpen)
   const template = useAnimationStore((s) => s.template)
   const status = useAnimationStore((s) => s.status)
   const time = useAnimationStore((s) => s.time)
@@ -157,186 +205,163 @@ export function AnimationsTab({ ready }: {
   const pieceCount = useAnimationStore((s) => s.pieceCount)
   const zoom = useAnimationStore((s) => s.zoom)
   const tilt = useAnimationStore((s) => s.tilt)
-  const walkthrough = useViewer((s) => s.walkthroughMode)
   const store = useAnimationStore.getState()
   const running = status === 'playing' || status === 'paused'
-  const active = TEMPLATES.find((t) => t.id === template)!
-
-  // A walkthrough owns the screen and the camera: a build in progress steps aside.
-  useEffect(() => {
-    if (walkthrough && running) useAnimationStore.getState().stop()
-  }, [walkthrough, running])
-
-  // `?animation=<template>` plays that template once the scene is ready (handy for embeds).
-  useEffect(() => {
-    if (!ready) return
-    const wanted = new URLSearchParams(window.location.search).get('animation') as TemplateId | null
-    if (wanted && TEMPLATES.some((t) => t.id === wanted)) useAnimationStore.getState().select(wanted)
-  }, [ready])
-
-  if (walkthrough) return null
-
+  const active = TEMPLATES.find((t) => t.id === template) ?? TEMPLATES[0]!
   const progress = duration > 0 ? Math.min(1, time / duration) : 0
-  const toggleOpen = (next: boolean) => {
-    setOpen(next)
-    useAnimationStore.setState({ panelOpen: next })
-  }
 
   const playPause = status === 'playing' ? (
-    <IconButton label="Pause" onClick={store.pause}><Pause className="size-4" /></IconButton>
+    <IconButton label="Pause" onClick={store.pause} primary>
+      <Pause className="size-4" />
+    </IconButton>
   ) : (
-    <IconButton disabled={!ready} label={status === 'paused' ? 'Resume' : `Play ${active.name}`} onClick={store.play}>
-      <Play className="size-4" />
+    <IconButton
+      disabled={!ready}
+      label={status === 'paused' ? 'Resume' : `Play ${active.name}`}
+      onClick={store.play}
+      primary
+    >
+      <Play className="size-4 translate-x-[0.5px]" />
     </IconButton>
   )
 
-  const scrubber = (
-    <input
-      aria-label="Timeline"
-      className="anim-scrub h-1 w-full cursor-pointer"
-      disabled={!ready}
-      max={1000}
-      min={0}
-      onChange={(event) => store.seek((Number(event.target.value) / 1000) * (duration || 1))}
-      style={{ ['--anim-accent' as string]: active.accent, ['--anim-progress' as string]: `${progress * 100}%` }}
-      type="range"
-      value={Math.round(progress * 1000)}
-    />
-  )
-
-  // Docked on the right edge, centred top to bottom, so the house in the middle stays clear.
   return (
-    <div className="pointer-events-none absolute top-1/2 right-3 z-40 flex -translate-y-1/2 flex-col items-end sm:right-4">
-      <div
-        className="dark corner-smooth pointer-events-auto flex max-h-[calc(100dvh-9rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background/90 text-foreground shadow-elevation-5 backdrop-blur-xl"
-        data-animations-tab={open ? 'open' : 'closed'}
-      >
-        {open ? (
-          <div className="flex w-[min(18rem,calc(100vw-1.5rem))] flex-col">
-            <div className="flex items-center gap-1 p-1.5 pb-0">
-              <button
-                aria-expanded
-                className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-full px-2.5 font-medium text-sm transition-colors hover:bg-accent"
-                onClick={() => toggleOpen(false)}
-                title="Hide animations"
-                type="button"
-              >
-                <Sparkles className="size-4 shrink-0" style={{ color: active.accent }} />
-                <span className="truncate">Animations</span>
-                {pieceCount > 0 && <span className="ml-auto font-mono text-[10px] text-muted-foreground">{pieceCount} pieces</span>}
-                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-              </button>
-            </div>
-
-            <div className="anim-strip grid grid-cols-2 gap-1.5 overflow-y-auto p-2">
-              {TEMPLATES.map((t) => (
-                <TemplateCard active={t.id === template} key={t.id} onPick={() => ready && store.select(t.id)} template={t} />
-              ))}
-            </div>
-
-            <p className="px-3 pb-1 text-[11px] text-muted-foreground leading-snug">
-              <span className="font-medium text-foreground">{active.name}.</span> {active.tagline}
-            </p>
-
-            <div className="flex flex-col gap-1.5 border-border/60 border-t px-3 py-2">
-              <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-[0.12em]">Camera</span>
-              <label className="flex items-center gap-2 text-[11px]">
-                <span className="w-9 shrink-0 text-muted-foreground">Zoom</span>
-                <input
-                  aria-label="Camera zoom"
-                  className="anim-scrub h-1 w-full cursor-pointer"
-                  max={200}
-                  min={50}
-                  onChange={(event) => store.setZoom(Number(event.target.value) / 100)}
-                  style={{ ['--anim-accent' as string]: active.accent, ['--anim-progress' as string]: `${((zoom * 100 - 50) / 150) * 100}%` }}
-                  type="range"
-                  value={Math.round(zoom * 100)}
-                />
-                <span className="w-9 shrink-0 text-right font-mono text-[10px] text-muted-foreground tabular-nums">{Math.round(zoom * 100)}%</span>
-              </label>
-              <label className="flex items-center gap-2 text-[11px]">
-                <span className="w-9 shrink-0 text-muted-foreground">Tilt</span>
-                <input
-                  aria-label="Camera tilt"
-                  className="anim-scrub h-1 w-full cursor-pointer"
-                  max={85}
-                  min={5}
-                  onChange={(event) => store.setTilt(Number(event.target.value))}
-                  style={{ ['--anim-accent' as string]: active.accent, ['--anim-progress' as string]: `${(((tilt ?? 58) - 5) / 80) * 100}%` }}
-                  type="range"
-                  value={tilt ?? 58}
-                />
-                <button
-                  className={`w-9 shrink-0 rounded-full text-right font-mono text-[10px] tabular-nums ${tilt === null ? 'text-muted-foreground' : 'text-foreground hover:underline'}`}
-                  onClick={() => store.setTilt(null)}
-                  title={tilt === null ? 'Each template picks its own tilt' : 'Back to each template’s own tilt'}
-                  type="button"
-                >
-                  {tilt === null ? 'Auto' : `${tilt}°`}
-                </button>
-              </label>
-              <span className="text-[10px] text-muted-foreground leading-snug">Tilt: 5° looks straight down, 85° from the ground.</span>
-            </div>
-
-            <div className="flex flex-col gap-1.5 border-border/60 border-t p-1.5 pt-2">
-              <div className="flex items-center gap-2 px-1.5">
-                {scrubber}
-                <span className="shrink-0 whitespace-nowrap font-mono text-[10px] text-muted-foreground tabular-nums">
-                  {formatTime(time)} / {formatTime(duration)}
-                </span>
-              </div>
-              <div className="flex items-center gap-0.5">
-                {playPause}
-                <IconButton disabled={!ready} label="Replay" onClick={store.replay}><RotateCcw className="size-4" /></IconButton>
-                <IconButton disabled={!running} label="Stop and show the finished house" onClick={store.stop}>
-                  <Square className="size-3.5" />
-                </IconButton>
-                <span className="flex-1" />
-                <button
-                  className="h-8 shrink-0 rounded-full px-2 font-mono text-[11px] transition-colors hover:bg-accent"
-                  onClick={() => store.setSpeed(SPEEDS[(SPEEDS.indexOf(speed as (typeof SPEEDS)[number]) + 1) % SPEEDS.length]!)}
-                  title="Speed"
-                  type="button"
-                >
-                  {speed}×
-                </button>
-                <button
-                  aria-pressed={cinematic}
-                  className={`flex size-8 shrink-0 items-center justify-center rounded-full transition-colors ${cinematic ? 'bg-accent' : 'text-muted-foreground hover:bg-accent'}`}
-                  onClick={() => store.setCinematic(!cinematic)}
-                  title={cinematic ? 'Cinematic camera on' : 'Cinematic camera off'}
-                  type="button"
-                >
-                  <Camera className="size-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          // Folded: a slim tab with the transport, and the progress while a build plays.
-          <div className="flex flex-col items-stretch">
-            <div className="flex items-center gap-0.5 p-1.5">
-              <button
-                aria-expanded={false}
-                className="flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-medium text-sm transition-colors hover:bg-accent"
-                onClick={() => toggleOpen(true)}
-                title="Show animations"
-                type="button"
-              >
-                <ChevronLeft className="size-3.5 text-muted-foreground" />
-                <Sparkles className="size-4" style={{ color: active.accent }} />
-                Animations
-              </button>
-              {playPause}
-              <IconButton disabled={!ready} label="Replay" onClick={store.replay}><RotateCcw className="size-4" /></IconButton>
-            </div>
-            {running && (
-              <div className="mx-3 mb-2 h-0.5 overflow-hidden rounded-full bg-foreground/15">
-                <div className="h-full rounded-full" style={{ width: `${progress * 100}%`, background: active.accent }} />
-              </div>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="anim-strip flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span
+              aria-hidden
+              className="flex size-6 shrink-0 items-center justify-center rounded-lg bg-[var(--glass-accent-soft)] text-[var(--glass-accent)]"
+            >
+              <Sparkles className="size-3.5" />
+            </span>
+            <span className="font-semibold text-[11px] text-[var(--glass-muted)] uppercase tracking-[0.12em]">
+              Build templates
+            </span>
+            {status === 'playing' && (
+              <span aria-hidden className="anim-live-dot size-1.5 shrink-0 rounded-full bg-[var(--glass-accent)]" />
             )}
           </div>
-        )}
+          {pieceCount > 0 && (
+            <span className="rounded-full bg-[var(--glass-bg-subtle)] px-2 py-0.5 font-mono text-[11px] text-[var(--glass-muted)] tabular-nums">
+              {pieceCount} pieces
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          {TEMPLATES.map((t) => (
+            <TemplateCard active={t.id === template} key={t.id} onPick={() => ready && store.select(t.id)} template={t} />
+          ))}
+        </div>
+
+        <div className="flex items-start gap-2.5 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg-subtle)] px-3 py-2.5">
+          <span aria-hidden className="mt-0.5 h-7 w-[2.5px] shrink-0 rounded-full bg-[var(--glass-accent)]" />
+          <p className="text-[var(--glass-muted)] text-xs leading-relaxed">
+            <span className="font-semibold text-[var(--glass-ink)]">{active.name}.</span> {active.tagline}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 rounded-2xl border border-[var(--glass-border)] bg-white/60 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-semibold text-[11px] text-[var(--glass-muted)] uppercase tracking-[0.12em]">Camera</span>
+            <span className="text-[11px] text-[var(--glass-muted)]">5° top · 85° low</span>
+          </div>
+          <label className="flex items-center gap-2.5 text-xs">
+            <span className="w-9 shrink-0 font-medium text-[var(--glass-muted)]">Zoom</span>
+            <input
+              aria-label="Camera zoom"
+              className="anim-scrub w-full cursor-pointer"
+              max={200}
+              min={50}
+              onChange={(event) => store.setZoom(Number(event.target.value) / 100)}
+              style={{ ['--anim-accent' as string]: active.accent, ['--anim-progress' as string]: `${((zoom * 100 - 50) / 150) * 100}%` }}
+              type="range"
+              value={Math.round(zoom * 100)}
+            />
+            <span className="min-w-[3.25rem] shrink-0 rounded-full bg-[var(--glass-bg-subtle)] px-2 py-0.5 text-center font-mono text-[11px] text-[var(--glass-muted)] tabular-nums">
+              {Math.round(zoom * 100)}%
+            </span>
+          </label>
+          <label className="flex items-center gap-2.5 text-xs">
+            <span className="w-9 shrink-0 font-medium text-[var(--glass-muted)]">Tilt</span>
+            <input
+              aria-label="Camera tilt"
+              className="anim-scrub w-full cursor-pointer"
+              max={85}
+              min={5}
+              onChange={(event) => store.setTilt(Number(event.target.value))}
+              style={{ ['--anim-accent' as string]: active.accent, ['--anim-progress' as string]: `${(((tilt ?? 58) - 5) / 80) * 100}%` }}
+              type="range"
+              value={tilt ?? 58}
+            />
+            <button
+              className={`studio-interactive min-w-[3.25rem] shrink-0 rounded-full border px-2 py-0.5 text-center font-mono text-[11px] tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] ${
+                tilt === null
+                  ? 'border-transparent bg-[var(--glass-bg-subtle)] text-[var(--glass-muted)] hover:text-[var(--glass-ink)]'
+                  : 'border-[var(--glass-accent-border)] bg-[var(--glass-accent-soft)] font-semibold text-[var(--glass-accent)] hover:bg-[rgb(38_73_196/0.16)]'
+              }`}
+              onClick={() => store.setTilt(null)}
+              title={tilt === null ? 'Each template picks its own tilt' : 'Back to each template’s own tilt'}
+              type="button"
+            >
+              {tilt === null ? 'Auto' : `${tilt}°`}
+            </button>
+          </label>
+        </div>
+      </div>
+
+      <div className="flex shrink-0 flex-col gap-2.5 border-[var(--glass-border)] border-t bg-[rgb(15_23_42/0.025)] p-4">
+        <div className="flex items-center gap-3">
+          <input
+            aria-label="Timeline"
+            className="anim-scrub w-full cursor-pointer"
+            disabled={!ready}
+            max={1000}
+            min={0}
+            onChange={(event) => store.seek((Number(event.target.value) / 1000) * (duration || 1))}
+            style={{ ['--anim-accent' as string]: active.accent, ['--anim-progress' as string]: `${progress * 100}%` }}
+            type="range"
+            value={Math.round(progress * 1000)}
+          />
+          <span className="shrink-0 whitespace-nowrap font-mono text-xs tabular-nums">
+            <span className="text-[var(--glass-ink)]">{formatTime(time)}</span>
+            <span className="text-[var(--glass-muted)]"> / {formatTime(duration)}</span>
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {playPause}
+          <IconButton disabled={!ready} label="Replay" onClick={store.replay}><RotateCcw className="size-4" /></IconButton>
+          <IconButton disabled={!running} label="Stop and show the finished house" onClick={store.stop}>
+            <Square className="size-3.5" />
+          </IconButton>
+          <span className="flex-1" />
+          <div className="flex items-center gap-0.5 rounded-full border border-[var(--glass-border)] bg-white/85 p-0.5">
+            <button
+              className="studio-interactive h-7 shrink-0 rounded-full px-2.5 font-medium font-mono text-xs text-[var(--glass-ink)] tabular-nums transition-colors hover:bg-[var(--glass-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] active:scale-95"
+              onClick={() => store.setSpeed(SPEEDS[(SPEEDS.indexOf(speed as (typeof SPEEDS)[number]) + 1) % SPEEDS.length]!)}
+              title="Speed"
+              type="button"
+            >
+              {speed}×
+            </button>
+            <button
+              aria-label={cinematic ? 'Cinematic camera on' : 'Cinematic camera off'}
+              aria-pressed={cinematic}
+              className={`studio-interactive flex size-7 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] active:scale-95 ${
+                cinematic
+                  ? 'bg-[var(--glass-accent-soft)] text-[var(--glass-accent)]'
+                  : 'text-[var(--glass-muted)] hover:bg-[var(--glass-bg-hover)] hover:text-[var(--glass-ink)]'
+              }`}
+              onClick={() => store.setCinematic(!cinematic)}
+              title={cinematic ? 'Cinematic camera on' : 'Cinematic camera off'}
+              type="button"
+            >
+              <Camera className="size-3.5" />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )
