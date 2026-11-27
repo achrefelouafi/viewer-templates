@@ -127,20 +127,19 @@ export function HudShell({
       )}
 
       <ViewPill
-        hasFloorplan={hasFloorplan}
-        onStageModeChange={onStageModeChange}
         padLeftClass={padLeftClass}
         padRightClass={padRightClass}
         source={source}
-        stageMode={stageMode}
       />
 
-      {!hideBottomBar && stageMode === '3d' && (
-        <ModeDock
-          animateOpen={animationsOpen}
-          onOpenAnimate={handleOpenAnimate}
-        />
-      )}
+      <ModeDock
+        animateOpen={animationsOpen}
+        hasFloorplan={hasFloorplan}
+        onOpenAnimate={handleOpenAnimate}
+        onStageModeChange={onStageModeChange}
+        showModes={!hideBottomBar && stageMode === '3d'}
+        stageMode={stageMode}
+      />
 
       <Inspector
         glbActive={glbActive}

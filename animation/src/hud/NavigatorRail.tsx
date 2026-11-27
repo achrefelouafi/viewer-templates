@@ -164,7 +164,7 @@ export function NavigatorRail({ projectName, ownerName, source, embed, collapsed
           className={`studio-interactive flex h-9 w-full shrink-0 items-center gap-2 rounded-full border px-3 font-medium text-[13px] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] ${
             buildingActive
               ? 'border-[var(--glass-accent-border)] bg-[var(--glass-accent-soft)] font-semibold text-[var(--glass-accent)]'
-              : 'border-[var(--glass-border)] bg-white/70 text-[var(--glass-ink)] hover:border-[var(--glass-border-strong)] hover:bg-white'
+              : 'border-[var(--glass-border)] bg-[var(--glass-raised-soft)] text-[var(--glass-ink)] hover:border-[var(--glass-border-strong)] hover:bg-[var(--glass-raised)]'
           }`}
           onClick={() => selectViewerBuilding(source)}
           type="button"
@@ -196,7 +196,7 @@ export function NavigatorRail({ projectName, ownerName, source, embed, collapsed
                       className={`studio-interactive group relative flex w-full items-center gap-2.5 rounded-xl border px-3 py-2 text-left text-[13px] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] ${
                         isSelected
                           ? 'border-[var(--glass-accent-border)] bg-[var(--glass-accent-soft)] font-semibold text-[var(--glass-accent)] shadow-xs'
-                          : 'border-transparent bg-white/55 text-[var(--glass-ink)]/85 hover:border-[var(--glass-border)] hover:bg-white/95 hover:text-[var(--glass-ink)]'
+                          : 'border-transparent bg-[var(--glass-raised-soft)] text-[var(--glass-ink)]/85 hover:border-[var(--glass-border)] hover:bg-[var(--glass-raised-soft)] hover:text-[var(--glass-ink)]'
                       }`}
                       onClick={() => selectLevel(lvl)}
                       type="button"
@@ -237,7 +237,7 @@ export function NavigatorRail({ projectName, ownerName, source, embed, collapsed
                                     : selectViewerRoom(row.id, source))}
                                   type="button"
                                 >
-                                  <span aria-hidden className="size-2 shrink-0 rounded-full ring-1 ring-black/10" style={{ backgroundColor: row.color }} />
+                                  <span aria-hidden className="size-2 shrink-0 rounded-full ring-1 ring-[var(--glass-border)]" style={{ backgroundColor: row.color }} />
                                   <span className="min-w-0 flex-1 truncate">{row.label}</span>
                                   <span className="shrink-0 font-mono text-[11px] text-[var(--glass-muted)] tabular-nums">
                                     {formatRoomArea(row.areaM2, unit, locale)}
@@ -326,7 +326,7 @@ export function NavigatorRail({ projectName, ownerName, source, embed, collapsed
                 className={`studio-interactive flex size-10 shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] ${
                   buildingActive
                     ? 'border-[var(--glass-accent-border)] bg-[var(--glass-accent-soft)] text-[var(--glass-accent)]'
-                    : 'border-[var(--glass-border)] bg-white/75 text-[var(--glass-ink)] hover:bg-white'
+                    : 'border-[var(--glass-border)] bg-[var(--glass-raised-soft)] text-[var(--glass-ink)] hover:bg-[var(--glass-raised)]'
                 }`}
                 onClick={() => selectViewerBuilding(source)}
                 type="button"
@@ -357,7 +357,7 @@ export function NavigatorRail({ projectName, ownerName, source, embed, collapsed
                       className={`studio-interactive flex size-10 shrink-0 items-center justify-center rounded-full border font-mono font-semibold text-xs transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] ${
                         isSelected
                           ? 'border-[var(--glass-accent)] bg-[var(--glass-accent)] text-white shadow-xs'
-                          : 'border-[var(--glass-border)] bg-white/75 text-[var(--glass-ink)] hover:border-[var(--glass-border-strong)] hover:bg-white'
+                          : 'border-[var(--glass-border)] bg-[var(--glass-raised-soft)] text-[var(--glass-ink)] hover:border-[var(--glass-border-strong)] hover:bg-[var(--glass-raised)]'
                       }`}
                       onClick={() => selectLevel(lvl)}
                       type="button"

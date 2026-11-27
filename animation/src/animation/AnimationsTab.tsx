@@ -136,7 +136,7 @@ function TemplateCard({ template, active, onPick }: { template: AnimationTemplat
       className={`anim-card studio-interactive group flex min-h-[48px] items-center gap-2 rounded-xl border p-1.5 text-left transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] active:scale-[0.98] ${
         active
           ? 'text-[var(--glass-ink)]'
-          : 'border-[var(--glass-border)] bg-white/70 text-[var(--glass-ink)]/90 hover:border-[var(--glass-border-strong)] hover:bg-white hover:text-[var(--glass-ink)]'
+          : 'border-[var(--glass-border)] bg-[var(--glass-raised-soft)] text-[var(--glass-ink)]/90 hover:border-[var(--glass-border-strong)] hover:bg-[var(--glass-raised)] hover:text-[var(--glass-ink)]'
       }`}
       data-template={template.id}
       onClick={onPick}
@@ -263,7 +263,7 @@ export function AnimationsPanel({ ready }: {
           </p>
         </div>
 
-        <div className="flex flex-col gap-2 rounded-2xl border border-[var(--glass-border)] bg-white/60 p-3">
+        <div className="flex flex-col gap-2 rounded-2xl border border-[var(--glass-border)] bg-[var(--glass-raised-soft)] p-3">
           <div className="flex items-center justify-between gap-2">
             <span className="font-semibold text-[11px] text-[var(--glass-muted)] uppercase tracking-[0.12em]">Camera</span>
             <span className="text-[11px] text-[var(--glass-muted)]">5° top · 85° low</span>
@@ -312,7 +312,7 @@ export function AnimationsPanel({ ready }: {
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-col gap-2.5 border-[var(--glass-border)] border-t bg-[rgb(15_23_42/0.025)] p-4">
+      <div className="flex shrink-0 flex-col gap-2.5 border-[var(--glass-border)] border-t bg-[var(--glass-bg-subtle)] p-4">
         <div className="flex items-center gap-3">
           <input
             aria-label="Timeline"
@@ -337,7 +337,7 @@ export function AnimationsPanel({ ready }: {
             <Square className="size-3.5" />
           </IconButton>
           <span className="flex-1" />
-          <div className="flex items-center gap-0.5 rounded-full border border-[var(--glass-border)] bg-white/85 p-0.5">
+          <div className="flex items-center gap-0.5 rounded-full border border-[var(--glass-border)] bg-[var(--glass-raised-soft)] p-0.5">
             <button
               className="studio-interactive h-7 shrink-0 rounded-full px-2.5 font-medium font-mono text-xs text-[var(--glass-ink)] tabular-nums transition-colors hover:bg-[var(--glass-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] active:scale-95"
               onClick={() => store.setSpeed(SPEEDS[(SPEEDS.indexOf(speed as (typeof SPEEDS)[number]) + 1) % SPEEDS.length]!)}

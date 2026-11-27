@@ -45,6 +45,8 @@ import {
   Video,
   X,
 } from 'lucide-react'
+import { Monitor as MonitorIcon } from 'lucide-react'
+import { useTheme } from './theme'
 import { type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 
 export type InspectorTabId = 'scene' | 'look' | 'light'
@@ -68,7 +70,7 @@ function SectionLabel({ children, right }: { children: ReactNode; right?: ReactN
 
 function ControlCard({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-2.5 rounded-2xl border border-[var(--glass-border)] bg-white/65 p-3">
+    <div className="flex flex-col gap-2.5 rounded-2xl border border-[var(--glass-border)] bg-[var(--glass-raised-soft)] p-3">
       {children}
     </div>
   )
@@ -120,7 +122,7 @@ function SegmentedRow<T extends string>({ label, options, value, onChange }: {
               aria-checked={active}
               className={`studio-interactive flex h-8 items-center justify-center gap-1.5 rounded-full px-2 text-xs transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] ${
                 active
-                  ? 'bg-white font-semibold text-[var(--glass-accent)] shadow-xs'
+                  ? 'bg-[var(--glass-raised)] font-semibold text-[var(--glass-accent)] shadow-xs'
                   : 'font-medium text-[var(--glass-muted)] hover:text-[var(--glass-ink)]'
               }`}
               key={option.id}
@@ -241,6 +243,7 @@ const SWATCH_ROLES: readonly SurfaceRole[] = ['wall', 'roof', 'floor', 'glazing'
 
 function LookTab() {
   const i18n = usePascalI18n()
+  const themeChoice = useTheme((s) => s.choice)
   const shadows = useViewer((s) => s.shadows)
   const cameraMode = useViewer((s) => s.cameraMode)
   const textures = useViewer((s) => s.textures)
@@ -283,6 +286,19 @@ function LookTab() {
 
   return (
     <div className="hud-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+      <ControlCard>
+        <SegmentedRow
+          label="Interface"
+          onChange={(choice) => useTheme.getState().setChoice(choice)}
+          options={[
+            { id: 'system', label: 'System', icon: MonitorIcon },
+            { id: 'light', label: 'Light', icon: Sun },
+            { id: 'dark', label: 'Dark', icon: Moon },
+          ]}
+          value={themeChoice}
+        />
+      </ControlCard>
+
       <ControlCard>
         <SwitchRow
           checked={shadows}
@@ -329,7 +345,7 @@ function LookTab() {
                   className={`studio-interactive flex items-center gap-2 rounded-xl border p-2 text-left text-xs transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] ${
                     selected
                       ? 'border-[var(--glass-accent-border)] bg-[var(--glass-accent-soft)] font-semibold text-[var(--glass-accent)]'
-                      : 'border-[var(--glass-border)] bg-white/75 font-medium text-[var(--glass-ink)] hover:border-[var(--glass-border-strong)] hover:bg-white'
+                      : 'border-[var(--glass-border)] bg-[var(--glass-raised-soft)] font-medium text-[var(--glass-ink)] hover:border-[var(--glass-border-strong)] hover:bg-[var(--glass-raised)]'
                   }`}
                   key={theme.id}
                   onClick={() => useViewer.getState().setSceneTheme(theme.id)}
@@ -337,7 +353,7 @@ function LookTab() {
                   type="button"
                 >
                   <span
-                    className="grid size-6 shrink-0 grid-cols-2 overflow-hidden rounded-md border border-black/10"
+                    className="grid size-6 shrink-0 grid-cols-2 overflow-hidden rounded-md border border-[var(--glass-border)]"
                     style={{ backgroundColor: theme.background }}
                   >
                     {swatches.map((color, idx) => (
@@ -378,7 +394,7 @@ function LookTab() {
                 className={`studio-interactive flex items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] ${
                   selected
                     ? 'border-[var(--glass-accent-border)] bg-[var(--glass-accent-soft)]'
-                    : 'border-[var(--glass-border)] bg-white/75 hover:border-[var(--glass-border-strong)] hover:bg-white'
+                    : 'border-[var(--glass-border)] bg-[var(--glass-raised-soft)] hover:border-[var(--glass-border-strong)] hover:bg-[var(--glass-raised)]'
                 }`}
                 key={option.id}
                 onClick={() => useViewer.getState().setRenderQuality(option.id)}
@@ -632,7 +648,7 @@ function LightTab() {
         {/* Interactive sun-arc illustration */}
         <div
           aria-hidden
-          className="cursor-grab touch-none select-none overflow-hidden rounded-xl border border-black/10 active:cursor-grabbing"
+          className="cursor-grab touch-none select-none overflow-hidden rounded-xl border border-[var(--glass-border)] active:cursor-grabbing"
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId)
             setMinutesFromArc(event)
@@ -707,7 +723,7 @@ function LightTab() {
                 className={`studio-interactive flex flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] ${
                   active
                     ? 'border-[var(--glass-accent-border)] bg-[var(--glass-accent-soft)] font-semibold text-[var(--glass-accent)]'
-                    : 'border-[var(--glass-border)] bg-white/75 text-[var(--glass-ink)] hover:border-[var(--glass-border-strong)] hover:bg-white'
+                    : 'border-[var(--glass-border)] bg-[var(--glass-raised-soft)] text-[var(--glass-ink)] hover:border-[var(--glass-border-strong)] hover:bg-[var(--glass-raised)]'
                 }`}
                 key={preset.id}
                 onClick={() => useViewer.getState().setTimeOfDay(preset.id)}
@@ -776,7 +792,7 @@ function LightTab() {
                 className={`studio-interactive flex flex-col items-center gap-0.5 rounded-xl border px-1 py-2 text-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] ${
                   active
                     ? 'border-[var(--glass-accent-border)] bg-[var(--glass-accent-soft)] font-semibold text-[var(--glass-accent)]'
-                    : 'border-[var(--glass-border)] bg-white/75 text-[var(--glass-ink)] hover:border-[var(--glass-border-strong)] hover:bg-white'
+                    : 'border-[var(--glass-border)] bg-[var(--glass-raised-soft)] text-[var(--glass-ink)] hover:border-[var(--glass-border-strong)] hover:bg-[var(--glass-raised)]'
                 }`}
                 key={option.id}
                 onClick={() => useViewer.getState().setWeather(option.id)}
@@ -863,7 +879,7 @@ export function Inspector({ open, tab, onOpenChange, onTabChange, glbActive, glb
                 aria-selected={selected}
                 className={`studio-interactive flex h-8 items-center justify-center rounded-full px-2 text-xs transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] ${
                   selected
-                    ? 'bg-white font-semibold text-[var(--glass-accent)] shadow-xs'
+                    ? 'bg-[var(--glass-raised)] font-semibold text-[var(--glass-accent)] shadow-xs'
                     : 'font-medium text-[var(--glass-muted)] hover:text-[var(--glass-ink)]'
                 }`}
                 id={`inspector-tab-${item.id}`}
@@ -915,7 +931,7 @@ export function Inspector({ open, tab, onOpenChange, onTabChange, glbActive, glb
             <button
               aria-expanded={false}
               aria-label="Open settings"
-              className="studio-hud-light studio-interactive pointer-events-auto relative flex size-10 items-center justify-center rounded-full text-[var(--glass-ink)] transition-transform hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] active:scale-95"
+              className="studio-hud-light studio-interactive pointer-events-auto relative flex size-10 items-center justify-center rounded-full text-[var(--glass-ink)] transition-transform hover:bg-[var(--glass-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] active:scale-95"
               onClick={() => onOpenChange(true)}
               type="button"
             >

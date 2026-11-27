@@ -60,7 +60,7 @@ test('the controls bar loads its icons from the template origin', async ({ page 
   await mockPascal(page, () => ({ body: liveScene() }))
   await page.goto(`/?project=${PROJECT}`)
   await expect(page.locator(READY)).toBeVisible({ timeout: 60_000 })
-  await expect(page.getByRole('button', { name: /walkthrough/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Animate', exact: true })).toBeVisible()
   await expect.poll(() => icons.size).toBeGreaterThan(0)
   for (const status of icons.values()) expect(status).toBe(200)
   expect([...icons.keys()].every((path) => /^\/icons\/[a-z]+\.webp$/.test(path))).toBe(true)
@@ -138,7 +138,7 @@ test('embed hides the owner line and guest prompt and tells the parent frame it 
   await expect(frame.getByText('Fixture house', { exact: true })).toBeVisible()
   await expect(frame.getByText('Want to create your own 3D project?')).toHaveCount(0)
   await expect(frame.getByText('Ada', { exact: true })).toHaveCount(0)
-  await expect(frame.getByRole('button', { name: /walkthrough/i })).toBeVisible()
+  await expect(frame.getByRole('button', { name: 'Animate', exact: true })).toBeVisible()
 })
 
 test('hideHeader and hideBottomBar remove the header and the controls bar', async ({ page }) => {
@@ -146,19 +146,7 @@ test('hideHeader and hideBottomBar remove the header and the controls bar', asyn
   await page.goto(`/?project=${PROJECT}&hideHeader=1&hideBottomBar=true`)
   await expect(page.locator(READY)).toBeVisible({ timeout: 60_000 })
   await expect(page.getByText('Fixture house', { exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /walkthrough/i })).toHaveCount(0)
-})
-
-test('walkthrough shows its HUD in place of the controls bar and Escape leaves it', async ({ page }) => {
-  await mockPascal(page, () => ({ body: liveScene() }))
-  await page.goto(`/?project=${PROJECT}&embed=1`)
-  await expect(page.locator(READY)).toBeVisible({ timeout: 60_000 })
-  await page.getByRole('button', { name: /walkthrough/i }).click()
-  await expect(page.locator('[data-walkthrough-hud]')).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByRole('button', { name: /walkthrough/i })).toHaveCount(0)
-  await page.keyboard.press('Escape')
-  await expect(page.locator('[data-walkthrough-hud]')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /walkthrough/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Animate', exact: true })).toHaveCount(0)
 })
 
 test('kinds from plugins the template cannot load are skipped without a notice', async ({ page }) => {
