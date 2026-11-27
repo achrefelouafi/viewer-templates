@@ -1,6 +1,7 @@
 import { type Material, Vector4 } from 'three'
 import { bool, Break, dot, float, Fn, fract, If, int, Loop, max, positionWorld, screenCoordinate, smoothstep, step, uniform, uniformArray, vec2 } from 'three/tsl'
 import { MeshStandardNodeMaterial, type NodeMaterial, type WebGPURenderer } from 'three/webgpu'
+import { notWarmup } from './warmup'
 
 /**
  * Where the Noir look is in colour, for the Blueprint build (after the Home Assistant viewer's
@@ -81,7 +82,7 @@ function coloured(): N {
 const OWN_KEYS = new Set(['uuid', 'id', 'type', 'version', '_listeners'])
 
 /** The material as a node material of its own, as three's renderer converts it, never shared. */
-function nodeCopy(source: Material, renderer: WebGPURenderer | null): NodeMaterial {
+export function nodeCopy(source: Material, renderer: WebGPURenderer | null): NodeMaterial {
   if ((source as NodeMaterial).isNodeMaterial) return (source as NodeMaterial).clone()
   const library = (renderer as unknown as { library?: { getMaterialNodeClass(type: string): (new () => NodeMaterial) | null } } | null)?.library
   const NodeClass = library?.getMaterialNodeClass(source.type) ?? MeshStandardNodeMaterial
@@ -101,7 +102,7 @@ function nodeCopy(source: Material, renderer: WebGPURenderer | null): NodeMateri
 export function colourMaterial(source: Material, renderer: WebGPURenderer | null): NodeMaterial {
   const material = nodeCopy(source, renderer)
   const own = (source as NodeMaterial).maskNode as N
-  const seam: N = coloured()
+  const seam: N = coloured().and(notWarmup())
   material.maskNode = own ? bool(own).and(seam) : seam
   material.userData = { ...material.userData, __tourNoir: true }
   material.needsUpdate = true

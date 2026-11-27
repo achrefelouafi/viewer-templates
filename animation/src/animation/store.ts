@@ -33,6 +33,11 @@ type AnimationState = {
   tilt: number | null
   /** Bumped when zoom or tilt changes, so the animator frames again at once. */
   framingId: number
+  /**
+   * The scene's look as it is drawn now. A template's look (Blueprint's Noir) is switched in and
+   * out behind `LookCurtain`, so this follows what the build wants a moment later.
+   */
+  appliedLook: 'default' | 'noir'
 
   select: (template: TemplateId) => void
   play: () => void
@@ -61,6 +66,7 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
   zoom: 1,
   tilt: null,
   framingId: 0,
+  appliedLook: 'default',
 
   select: (template) => set({ template, status: 'playing', time: 0, seekTo: null, runId: get().runId + 1 }),
   play: () => {

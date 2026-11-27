@@ -5,11 +5,13 @@ import type { CameraControlsImpl } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
-import { BlueprintLines, createClayMaterial, DustPool, GroundWaves, RoomFloors, SandCloud } from './effects'
+import { BlueprintLines, createClayMaterial, DustPool, GroundWaves, RoomFloors } from './effects'
 import { type BuildElement, type BuildSet, collectBuild } from './elements'
 import { clearFloorInk, floorInk, setFloorInk } from './ink'
 import { NoirLook } from './NoirLook'
 import { PaperSheet } from './paper'
+import { Precompiler } from './Precompiler'
+import { SandReveal } from './sandReveal'
 import { arrivalOf, createPose, poseAt, poseMatrix } from './poses'
 import { useAnimationStore } from './store'
 import { type Caption, type Timeline, templateById } from './templates'
@@ -43,7 +45,8 @@ type Run = {
   dust: DustPool
   lines: BlueprintLines | null
   waves: GroundWaves | null
-  sand: SandCloud | null
+  /** Sand: each piece builds up from its foot out of sand, its own surface rising behind. */
+  sandReveal: SandReveal | null
   /** The Noir look's paper plans, one per floor. */
   papers: PaperSheet[]
   /** Slabs that build room by room: the tiles, and the slab hidden until they are down. */
@@ -185,7 +188,7 @@ function restore(run: Run) {
   run.dust.dispose()
   run.lines?.dispose()
   run.waves?.dispose()
-  run.sand?.dispose()
+  run.sandReveal?.dispose()
   for (const floors of run.floors.values()) floors.dispose()
   for (const paper of run.papers) paper.dispose()
   if (run.timeline.noir) clearFloorInk()
@@ -208,7 +211,7 @@ function restore(run: Run) {
 /** A level's name as the navigator shows it ("Ground floor", "Floor 1"), for the paper's corner. */
 type LevelNamer = (levelId: string) => string | null
 
-function startRun(source: ViewerSource, scene: THREE.Scene, levelName: LevelNamer): Run | null {
+function startRun(source: ViewerSource, scene: THREE.Scene, levelName: LevelNamer, renderer: unknown): Run | null {
   const set = collectBuild(source)
   if (!set) return null
   const template = templateById(useAnimationStore.getState().template)
@@ -239,12 +242,10 @@ function startRun(source: ViewerSource, scene: THREE.Scene, levelName: LevelName
   const waves = timeline.waves ? new GroundWaves(timeline.waves) : null
   if (waves) scene.add(waves.group)
 
-  let sand: SandCloud | null = null
+  let sandReveal: SandReveal | null = null
   if (timeline.sand) {
-    const starts = new Map<string, number>()
-    for (const [id, track] of timeline.tracks) starts.set(id, track.start)
-    sand = new SandCloud(set.elements, starts, set.center, set.radius, set.size.y, set.groundY, timeline.sand.flight)
-    scene.add(sand.mesh)
+    const others = new Set(set.elements.map((e) => e.object))
+    sandReveal = new SandReveal(set.elements, timeline.tracks, (element) => ownMeshes(element, others), renderer as never)
   }
 
   // A slab that spreads in grows room by room, each from its own room's centre.
@@ -298,7 +299,7 @@ function startRun(source: ViewerSource, scene: THREE.Scene, levelName: LevelName
   const sunBefore = timeline.sun ? { timeOfDay: viewer.timeOfDay, minutes: viewer.timeOfDayMinutes } : null
 
   return {
-    set, timeline, elements, hiddenBatches: new Set(), dust, lines, waves, sand, papers, floors, clay, sunBefore,
+    set, timeline, elements, hiddenBatches: new Set(), dust, lines, waves, sandReveal, papers, floors, clay, sunBefore,
     lastMinutes: -1, cameraKey: -1, caption: null,
     time: 0, clock: 0, cameraTaken: false,
   }
@@ -365,8 +366,8 @@ function frameBox(controls: Controls, box: THREE.Box3, polar: number) {
   controls.dollyTo(distance, true)
 }
 
-/** Spread around the build that the opening framing leaves room for: the storm, the sand ring. */
-const FRAMING_SPREAD: Record<string, number> = { magnetic: 0.6, sand: 0.55 }
+/** Spread around the build that the opening framing leaves room for: the storm. */
+const FRAMING_SPREAD: Record<string, number> = { magnetic: 0.6 }
 
 function updateCamera(run: Run, controls: Controls | null, cinematic: boolean) {
   const keys = run.timeline.cameraKeys
@@ -382,6 +383,7 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
   const scene = useThree((state) => state.scene)
   const controls = useThree((state) => state.controls) as Controls | null
   const invalidate = useThree((state) => state.invalidate)
+  const gl = useThree((state) => state.gl)
   const runRef = useRef<Run | null>(null)
   const runId = useAnimationStore((state) => state.runId)
   const status = useAnimationStore((state) => state.status)
@@ -403,7 +405,7 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
       restore(previous)
       runRef.current = null
     }
-    const run = startRun(sourceRef.current, scene, (id) => levelNameRef.current(id))
+    const run = startRun(sourceRef.current, scene, (id) => levelNameRef.current(id), gl)
     if (!run) {
       useAnimationStore.setState({ status: 'idle', pieceCount: 0, duration: 0 })
       return
@@ -417,26 +419,35 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
     applyClay(run, run.time)
     applySun(run, run.time)
     applyNoir(run, run.time)
-    run.sand?.update(run.time)
+    run.sandReveal?.update(run.time)
     if (store.cinematic && controls) {
       if (run.timeline.cameraKeys) updateCamera(run, controls, true)
       else frameBuild(controls, run.set, FRAMING_SPREAD[store.template] ?? 0.15)
     }
     invalidate()
-  }, [runId, ready, scene, controls, invalidate])
+  }, [runId, ready, scene, controls, invalidate, gl])
 
   // Stopping puts everything back where it was.
   useEffect(() => {
     if (status !== 'idle' && status !== 'finished') return
     const run = runRef.current
     if (!run) return
-    // A Noir build stays as it ended (the ground floor's plan under the house, the batches still
-    // stepped aside so everything keeps its colour) until it is stopped or played again.
-    if (status === 'finished' && run.timeline.noir) return
+    // A Noir build holds its last frame (the batches still stepped aside, so everything keeps its
+    // colour) until the curtain has switched the look back: then it is put back (below).
+    if (status === 'finished' && run.timeline.noir && useAnimationStore.getState().appliedLook === 'noir') return
     restore(run)
     runRef.current = null
     invalidate()
   }, [status, invalidate])
+
+  const appliedLook = useAnimationStore((state) => state.appliedLook)
+  useEffect(() => {
+    const run = runRef.current
+    if (appliedLook !== 'default' || !run?.timeline.noir || useAnimationStore.getState().status !== 'finished') return
+    restore(run)
+    runRef.current = null
+    invalidate()
+  }, [appliedLook, invalidate])
 
   // Zoom or tilt changed in the panel: frame again at once, the build in progress or the house at rest.
   const framingId = useAnimationStore((state) => state.framingId)
@@ -546,7 +557,7 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
     applyClay(run, run.time)
     applySun(run, run.time)
     applyNoir(run, run.time)
-    run.sand?.update(run.time)
+    run.sandReveal?.update(run.time)
     updateCamera(run, controls, state.cinematic)
     const caption = captionAt(run.timeline, run.time)
     if (caption !== run.caption) {
@@ -578,17 +589,29 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
     invalidate()
   })
 
-  // The Noir look (the Home Assistant viewer's wireframe) for the templates that ask for it, from
-  // the moment one plays until it is stopped.
+  // The Noir look (the Home Assistant viewer's wireframe) for the templates that ask for it, while
+  // the curtain has it switched in (`LookCurtain`).
   const noir = useNoirActive() && ready
-  return noir ? <NoirLook source={source} /> : null
+  return (
+    <>
+      {/* Gets the heavy animations ready while the project is on screen. */}
+      <Precompiler ready={ready} source={source} />
+      {noir && <NoirLook source={source} />}
+    </>
+  )
 }
 
 /**
- * Whether a build in the Noir look is on (playing, paused or finished, until stopped). The viewer
- * turns Pascal's daylight off then, as the Home Assistant viewer does, so the sky and the day's
- * ground give way to the Noir background and its grey glow.
+ * Whether the Noir look is drawn now (switched in behind the curtain). The viewer turns Pascal's
+ * daylight off then, as the Home Assistant viewer does, so the sky and the day's ground give way to
+ * the Noir background and its grey glow.
  */
 export function useNoirActive(): boolean {
-  return useAnimationStore((state) => state.status !== 'idle' && templateById(state.template).look === 'noir')
+  return useAnimationStore((state) => state.appliedLook === 'noir')
+}
+
+/** Whether the build wants the Noir look: a Noir template playing or paused (not once it ends). */
+export function useNoirWanted(): boolean {
+  return useAnimationStore((state) =>
+    (state.status === 'playing' || state.status === 'paused') && templateById(state.template).look === 'noir')
 }

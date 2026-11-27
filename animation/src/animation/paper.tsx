@@ -9,6 +9,7 @@ import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import * as THREE from 'three'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
+import { notWarmup, type WarmItem } from './warmup'
 
 /**
  * The Blueprint build's paper: for each floor, a sheet the size of the building with that floor's
@@ -214,6 +215,43 @@ function planSvg(geometries: Geometry[], bounds: PlanBounds, px: number, title: 
   return text
 }
 
+type Sheet = { texture: THREE.CanvasTexture; front: MeshStandardNodeMaterial; back: MeshStandardNodeMaterial }
+
+/**
+ * A floor's printed sheet (its plan texture and the paper's two materials), drawn once for the page
+ * and kept, so the precompiler can make it while the project loads and a replay finds it ready.
+ */
+const sheets = new Map<string, Sheet>()
+
+function sheetKey(plan: PaperPlan): string {
+  const b = plan.bounds
+  return [plan.levelId, plan.title, b.minX, b.minY, b.maxX, b.maxY].map((v) => (typeof v === 'number' ? v.toFixed(3) : v)).join('|')
+}
+
+function sheetFor(plan: PaperPlan, nodes: Record<string, unknown>): Sheet {
+  const key = sheetKey(plan)
+  const known = sheets.get(key)
+  if (known) return known
+  const texture = planTexture(planNodes(nodes), plan.levelId, plan.bounds, plan.title)
+  const front = new MeshStandardNodeMaterial({ map: texture, roughness: 0.92, metalness: 0, transparent: true })
+  const back = new MeshStandardNodeMaterial({ color: '#d9d3c4', roughness: 0.95, metalness: 0, transparent: true })
+  for (const material of [front, back]) {
+    material.userData.__tourNoir = true
+    material.maskNode = notWarmup()
+  }
+  const sheet = { texture, front, back }
+  sheets.set(key, sheet)
+  return sheet
+}
+
+const PANEL = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)
+
+/** Makes a floor's sheet ahead of its run, and returns what to draw to compile its materials. */
+export function preparePaper(plan: PaperPlan, nodes: Record<string, unknown>): WarmItem[] {
+  const { front, back } = sheetFor(plan, nodes)
+  return [{ geometry: PANEL, material: front }, { geometry: PANEL, material: back }]
+}
+
 /** The floor's plan on a canvas texture; the paper shows blank until the image has loaded. */
 function planTexture(nodes: PlanNodes, levelId: string, bounds: PlanBounds, title: string): THREE.CanvasTexture {
   const width = bounds.maxX - bounds.minX
@@ -303,7 +341,6 @@ export class PaperSheet {
   private readonly lift = new THREE.Group()
   private readonly columns: THREE.Group[] = []
   private readonly hinges: THREE.Group[] = []
-  private readonly texture: THREE.CanvasTexture
   private readonly front: MeshStandardNodeMaterial
   private readonly back: MeshStandardNodeMaterial
   private readonly level = new THREE.Matrix4()
@@ -315,10 +352,17 @@ export class PaperSheet {
     const { bounds } = plan
     const W = bounds.maxX - bounds.minX
     const D = bounds.maxY - bounds.minY
-    this.texture = planTexture(planNodes(nodes), plan.levelId, bounds, plan.title)
-    this.front = new MeshStandardNodeMaterial({ map: this.texture, roughness: 0.92, metalness: 0, transparent: true })
-    this.back = new MeshStandardNodeMaterial({ color: '#d9d3c4', roughness: 0.95, metalness: 0, transparent: true })
-    for (const material of [this.front, this.back]) material.userData.__tourNoir = true
+    const sheet = sheetFor(plan, nodes)
+    this.front = sheet.front
+    this.back = sheet.back
+    // A kept sheet may have ended its last run faded out.
+    for (const material of [this.front, this.back]) {
+      material.opacity = 1
+      if (!material.depthWrite) {
+        material.depthWrite = true
+        material.needsUpdate = true
+      }
+    }
 
     levelObject.updateWorldMatrix(true, false)
     this.level.copy(levelObject.matrixWorld)
@@ -415,9 +459,7 @@ export class PaperSheet {
   dispose() {
     this.group.removeFromParent()
     this.group.traverse((child) => (child as THREE.Mesh).geometry?.dispose())
-    this.texture.dispose()
-    this.front.dispose()
-    this.back.dispose()
+    // The texture and materials are the page's (`sheets`): the next run uses them again.
   }
 }
 

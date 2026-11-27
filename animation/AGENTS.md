@@ -153,7 +153,8 @@ rules are in [listing's AGENTS.md](../listing/AGENTS.md#sign-in-with-pascal). In
 - **A timeline can also drive** the time of day (`sun`, through `useViewer`'s `setTimeOfDayMinutes`,
   put back after the run), title cards (`captions`), cinematic camera framings (`cameraKeys`), a
   clay pass (`clay`: each piece's own meshes wear one shared white material until their time;
-  transparent glass keeps its own) and the sand cloud (`sand`).
+  transparent glass keeps its own) and the sand build (`sand`: `sandReveal.ts` raises each piece out of sand from its foot, a slab
+  from its centre, its own materials rising behind through masked copies; no particles).
 - **A slab that spreads builds room by room**: `RoomFloors` lays a tile per room on it (the room's
   outline, slab-thick, in the slab's material), each growing from its own room's centre; the real
   slab takes over once the last tile is down.
@@ -170,6 +171,16 @@ rules are in [listing's AGENTS.md](../listing/AGENTS.md#sign-in-with-pascal). In
   and the viewer turns Pascal's daylight off while it is on (`useNoirActive`). Each floor gets a
   `PaperSheet` (`paper.tsx`) printed with that floor's plan from Pascal's own `def.floorplan`
   geometry and named as the navigator names it; it unfolds, the floor extrudes out of it, and
-  `ink.ts` develops the floor into colour. The look stays on a finished build until it is stopped.
+  `ink.ts` develops the floor into colour. The look switches in and out behind `LookCurtain.tsx` (a
+  CSS circle of the Noir background over the stage: `appliedLook` in the store follows what the build
+  wants once covered), and a finished build holds a beat, then switches back and is put back.
+- **Heavy animations are prepared ahead** (`Precompiler.tsx`, mounted by `BuildAnimator`): a moment
+  after the project appears, in slices of a few milliseconds a frame, it draws Blueprint's floor
+  plans into textures, works out the wireframe's edges, and makes and compiles Sand's shared
+  material copies. Shaders are compiled by drawing stand-ins that every animation material discards
+  (`warmup.ts`: put `notWarmup()` in the mask of any new animation material), because three builds
+  a pipeline for Pascal's own scene pass and lights, which `compileAsync` would not match. Noir's
+  shaders depend on its lights, so `NoirLook` warms them as it mounts, while the first paper drops.
+  These materials and textures are kept for the page, never disposed between runs.
 - **Overlays use single-sided node materials** and never raycast: a double-sided node material in
   Pascal's MRT scene pass breaks the WebGPU render context.

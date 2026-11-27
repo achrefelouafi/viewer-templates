@@ -157,7 +157,6 @@ function TemplateCard({ template, active, onPick }: { template: AnimationTemplat
       <span className={`min-w-0 flex-1 truncate text-xs leading-tight tracking-[-0.005em] ${active ? 'font-semibold' : 'font-medium'}`}>
         {template.name}
       </span>
-      {active && <span aria-hidden className="mr-0.5 size-1.5 shrink-0 rounded-full bg-[var(--glass-accent)]" />}
     </button>
   )
 }

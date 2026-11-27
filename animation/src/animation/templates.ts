@@ -61,8 +61,8 @@ export type WavePlan = {
   waves: Array<{ start: number; speed: number; reach: number; color: string }>
 }
 
-/** Sand: each piece's grains wait in a swirling cloud, then stream in and land by its start. */
-export type SandPlan = { flight: number }
+/** Sand: each piece builds up out of sand over its track, its own surface rising behind (`sandReveal.ts`). */
+export type SandPlan = true
 
 /** The day the build takes: time of day (minutes after midnight) at moments of the timeline. */
 export type SunPlan = Array<{ time: number; minutes: number }>
@@ -274,7 +274,8 @@ const blueprint: AnimationTemplate = {
     }
 
     const built = new THREE.Box3()
-    let t = 0.2
+    // (the first sheet waits for the curtain that switches the look in: `LookCurtain`)
+    let t = 0.9
     let end = t
     for (let storey = 0; storey <= top; storey++) {
       const onFloor = set.elements.filter((e) => e.storey === storey)
@@ -359,15 +360,10 @@ const blueprint: AnimationTemplate = {
       })
       end = Math.max(end, start + 1.5)
 
-      // The sheet settles under its slab as the floor rises; an upper floor's goes once in colour
-      // (the ground floor's stays: the plan under the house).
+      // The sheet settles under its slab as the floor rises (it goes when the next one opens: below).
       if (paper) {
         paper.sinkStart = extrudeStart
         paper.sinkEnd = extrudeStart + 0.6
-        if (storey > 0) {
-          paper.fadeStart = start + 0.3
-          paper.fadeEnd = start + 1.3
-        }
       }
 
       // The next floor's paper comes once this one's furniture is going in.
@@ -376,10 +372,18 @@ const blueprint: AnimationTemplate = {
 
     const restStart = end + 0.1
     const rest: [number, number] = [restStart, restStart + 1.2]
+    // One sheet at a time: each fades out while the next floor's unfolds, and the last one goes
+    // with the finale, as the whole house comes into colour.
+    papers.forEach((paper, index) => {
+      const next = papers[index + 1]
+      paper.fadeStart = next ? next.land : rest[0]
+      paper.fadeEnd = next ? next.flat : rest[1]
+    })
     cameraKeys.push({ time: end - 0.6, box: set.box.clone().expandByScalar(set.radius * 0.15), polar: Math.PI * 0.32 })
     return {
       tracks,
-      duration: rest[1] + 0.6,
+      // A beat on the finished house in colour before the look switches back.
+      duration: rest[1] + 1.6,
       noir: { papers, develop, rest },
       cameraKeys,
       orbit: Math.PI / 4,
@@ -641,23 +645,23 @@ const tornado: AnimationTemplate = {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 8. Sand: a ring of sand swirls round the plot; it streams in grain by grain, settles on each
-//    piece's surfaces, and the piece hardens out of it.
+// 8. Sand: each piece builds up out of sand from its foot (a slab spreads from its centre), and its
+//    own surface rises through the sand behind it (`sandReveal.ts`).
 
 const sand: AnimationTemplate = {
   id: 'sand',
   name: 'Sand',
-  tagline: 'A swirling ring of sand streams in and hardens into the house, piece by piece.',
+  tagline: 'Each piece builds up out of sand, and its real surface rises through it.',
   accent: '#e0b46c',
   build(set) {
     const tracks = new Map<string, Track>()
     const order = [...set.elements].sort((a, b) =>
       byRank(a, b) || distanceFrom(a, set.center) - distanceFrom(b, set.center))
-    const flight = 1.6
-    const end = crowd(order.length, 7.5, 10)
-    stagger(order, 2.4, end, 0.6, (e, start, duration) =>
+    const end = crowd(order.length, 6, 9)
+    // Each piece takes its time: the sand climbs it, then its own surface climbs through the sand.
+    stagger(order, 0.4, end, 1.6, (e, start, duration) =>
       tracks.set(e.id, { start, duration, motion: { kind: 'settle' } }))
-    return { tracks, duration: end + 1.4, sand: { flight }, orbit: Math.PI * 0.7 }
+    return { tracks, duration: end + 1.4, sand: true, orbit: Math.PI * 0.7 }
   },
 }
 

@@ -40,6 +40,7 @@ import type { Object3D } from 'three'
 import { viewerFlagsFromLocation } from '../config'
 import type { SceneResponse } from '../pascal'
 import { AnimationCaption } from '../animation/AnimationCaption'
+import { LookCurtain } from '../animation/LookCurtain'
 import { BuildAnimator, useNoirActive } from '../animation/BuildAnimator'
 import { HudShell } from '../hud/HudShell'
 import { pluginInstallStateOf, publishedSceneSetup } from '../runtime/plugins'
@@ -324,6 +325,8 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
               {droneActive && <ViewerDroneHud />}
               {stageMode === '3d' && <ViewerHoverLabel nodes={viewerSource.nodes} />}
             </ErrorBoundary>
+            {/* Covers the stage while a template's look switches in or out. */}
+            <LookCurtain />
           </ViewerStage>
         </>
       )}

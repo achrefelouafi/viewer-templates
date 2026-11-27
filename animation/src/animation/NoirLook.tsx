@@ -7,6 +7,7 @@ import * as THREE from 'three'
 import { length, mix, mrt, output, positionLocal, screenSize, screenUV, smoothstep, uniform, vec2, vec4 } from 'three/tsl'
 import { LineBasicNodeMaterial, MeshStandardNodeMaterial, type Node, type NodeBuilder, type NodeMaterial, type WebGPURenderer } from 'three/webgpu'
 import { colourMaterial, notColoured } from './ink'
+import { notWarmup, type WarmItem, Warmup } from './warmup'
 
 /**
  * The Blueprint build's look, ported from the Home Assistant viewer's `HomeNoir` (itself the
@@ -663,6 +664,12 @@ function createKit(palette: Palette) {
     ;(material as unknown as NodeMaterial).maskNode = null
     material.userData.__tourNoir = true
   }
+  // A warm-up stand-in (`warmup.ts`) draws nothing in any of them.
+  for (const material of [wall, item, floor, glass, wallEdge, itemEdge, solid.item, solid.floor]) {
+    const node = material as unknown as NodeMaterial
+    // biome-ignore lint/suspicious/noExplicitAny: TSL typings
+    node.maskNode = node.maskNode ? (node.maskNode as any).and(notWarmup()) : notWarmup()
+  }
   // Moving twins of the surfaces and edges, one per motion and base material.
   const twins = new Map<string, { base: THREE.Material; twin: THREE.Material }>()
   const twin = (base: THREE.Material, motion: Motion): THREE.Material => {
@@ -739,6 +746,21 @@ function createKit(palette: Palette) {
 
 type Kit = ReturnType<typeof createKit>
 
+/**
+ * The look's materials, made once for the page and kept: a replay, or the next Blueprint, draws
+ * with shaders already built. (`paint` with the one palette there is; nothing to dispose.)
+ */
+let pageKit: Kit | null = null
+const kitForPage = () => (pageKit ??= createKit(NOIR))
+
+/** Colour copies of the viewer's materials, by look, kept for the page as the kit is. */
+const pageColours = new Map<string, THREE.Material>()
+
+/** A mesh's edge lines, worked out now (they are remembered per geometry): for the precompiler. */
+export function prepareEdges(geometry: THREE.BufferGeometry) {
+  edgeLines(geometry, EDGE_THRESHOLD_DEG)
+}
+
 /** three's drawing pipeline, as far as this touches it: which objects a render skips. */
 type CullingPipeline = { isCulled?: (object: THREE.Object3D, camera: THREE.Camera) => boolean }
 
@@ -795,12 +817,13 @@ function copyLayers(mesh: THREE.Object3D): number {
  * floors are in colour; the Blueprint build drives it, floor by floor.
  */
 export function NoirLook({ source }: { source: ViewerSource }) {
-  const { scene, invalidate, gl } = useThree()
+  const { scene, invalidate, gl, camera } = useThree()
   const liveSource = useRef(source)
   liveSource.current = source
 
   const kit = useRef<Kit | null>(null)
-  kit.current ??= createKit(NOIR)
+  kit.current ??= kitForPage()
+  const warmup = useRef<Warmup | null>(null)
   const stash = useRef({
     meshes: new Map<THREE.Mesh, MeshStash>(),
     hidden: new Map<THREE.Object3D, boolean>(),
@@ -810,7 +833,7 @@ export function NoirLook({ source }: { source: ViewerSource }) {
   })
   const colour = useRef({
     copies: new Map<THREE.Mesh, { copy: THREE.Mesh; source: THREE.Material | THREE.Material[]; look: string }>(),
-    materials: new Map<string, THREE.Material>(),
+    materials: pageColours,
   })
 
   // The Noir theme and Pascal's ink edges, set on the store directly so nothing is written to the
@@ -1006,9 +1029,23 @@ export function NoirLook({ source }: { source: ViewerSource }) {
   useLayoutEffect(() => {
     const state = stash.current
     // (made again here when Strict Mode mounts twice: the first unmount disposed it)
-    const k = (kit.current ??= createKit(NOIR))
+    kit.current ??= kitForPage()
     scan()
     copyColour()
+    // Build every shader the look will draw now, while the first paper drops in, rather than as
+    // each piece first appears: the pieces held back are hidden, so stand-ins draw them unseen.
+    const warm = new Warmup(scene, 16)
+    const items: WarmItem[] = []
+    for (const [mesh, saved] of state.meshes) {
+      const instanced = (mesh as THREE.InstancedMesh).isInstancedMesh === true
+      items.push({ geometry: mesh.geometry, material: mesh.material, instanced, layers: mesh.layers.mask })
+      if (saved.edge) items.push({ geometry: saved.edge.geometry, material: saved.edge.material, lines: true, layers: saved.edge.layers.mask })
+    }
+    for (const [mesh, { copy }] of colour.current.copies) {
+      items.push({ geometry: mesh.geometry, material: copy.material, instanced: (mesh as THREE.InstancedMesh).isInstancedMesh === true, layers: copy.layers.mask })
+    }
+    warm.add(items)
+    warmup.current = warm
     const frustumOnly = pipeline && Object.getPrototypeOf(pipeline)?.isCulled
     if (pipeline && typeof frustumOnly === 'function') {
       const own: CullingPipeline['isCulled'] = function (this: unknown, object, camera) {
@@ -1020,17 +1057,15 @@ export function NoirLook({ source }: { source: ViewerSource }) {
     return () => {
       if (pipeline && culling.current && pipeline.isCulled === culling.current.own) pipeline.isCulled = culling.current.before
       culling.current = null
-      const { copies, materials } = colour.current
+      warmup.current?.dispose()
+      warmup.current = null
+      const { copies } = colour.current
       for (const { copy } of copies.values()) copy.removeFromParent()
       copies.clear()
-      for (const material of materials.values()) material.dispose()
-      materials.clear()
       for (const [mesh, saved] of state.meshes) restore(mesh, saved)
       state.meshes.clear()
       for (const [obj, visible] of state.hidden) obj.visible = visible
       state.hidden.clear()
-      k.dispose()
-      kit.current = null
       invalidate()
     }
     // biome-ignore lint/correctness/useExhaustiveDependencies: mount and unmount only
@@ -1040,6 +1075,7 @@ export function NoirLook({ source }: { source: ViewerSource }) {
   useFrame((_, delta) => {
     const state = stash.current
     if (!kit.current) return
+    if (warmup.current && !warmup.current.step(camera)) warmup.current = null
     for (const obj of state.hidden.keys()) obj.visible = false
     if (pipeline && culling.current && pipeline.isCulled !== culling.current.own) {
       culling.current.before = pipeline.isCulled
