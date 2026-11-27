@@ -256,16 +256,24 @@ const _sphere = new THREE.Sphere()
 function frameBox(controls: Controls, box: THREE.Box3, polar: number) {
   lastFraming = { box: box.clone(), polar }
   const { zoom, tilt } = useAnimationStore.getState()
+  const distance = fitDistance(controls, box) / Math.max(0.2, zoom)
+  const angle = THREE.MathUtils.clamp(tilt !== null ? THREE.MathUtils.degToRad(tilt) : polar, 0.03, Math.PI / 2 - 0.02)
+  controls.moveTo(_sphere.center.x, _sphere.center.y, _sphere.center.z, true)
+  controls.rotatePolarTo(angle, true)
+  controls.dollyTo(distance, true)
+}
+
+/**
+ * How far back the camera stands to hold `box`'s bounding sphere at zoom 1 (leaves the sphere in
+ * `_sphere`). Zoom is this over the camera's distance.
+ */
+function fitDistance(controls: Controls, box: THREE.Box3): number {
   box.getBoundingSphere(_sphere)
   const camera = controls.camera as THREE.PerspectiveCamera
   const vertical = THREE.MathUtils.degToRad(camera.isPerspectiveCamera ? camera.fov : 50)
   const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * (camera.aspect || 1))
   const fov = Math.min(vertical, horizontal)
-  const distance = ((_sphere.radius / Math.sin(fov / 2)) * 1.05) / Math.max(0.2, zoom)
-  const angle = THREE.MathUtils.clamp(tilt !== null ? THREE.MathUtils.degToRad(tilt) : polar, 0.03, Math.PI / 2 - 0.02)
-  controls.moveTo(_sphere.center.x, _sphere.center.y, _sphere.center.z, true)
-  controls.rotatePolarTo(angle, true)
-  controls.dollyTo(distance, true)
+  return (_sphere.radius / Math.sin(fov / 2)) * 1.05
 }
 
 /** Spread around the build that the opening framing leaves room for: the storm. */
@@ -360,6 +368,51 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
     if (runRef.current) runRef.current.cameraTaken = false
     invalidate()
   }, [framingId, controls, ready, invalidate])
+
+  // The person orbits, tilts or zooms the camera themselves (whenever its own input is on): the
+  // panel's Zoom and Tilt follow it, read off the camera against the framing it last had (the
+  // build's, at zoom 1). Only moves the person makes count: a framing's own glide changes nothing.
+  useEffect(() => {
+    if (!controls || !ready) return
+    let moving = false
+    let holding = false
+    let fit = 0
+    const follow = () => {
+      if (!moving || fit <= 0) return
+      const zoom = THREE.MathUtils.clamp(Math.round((fit / Math.max(1e-3, controls.distance)) * 100) / 100, 0.5, 2)
+      const tilt = THREE.MathUtils.clamp(Math.round(THREE.MathUtils.radToDeg(controls.polarAngle)), 5, 85)
+      useAnimationStore.getState().followCamera(zoom, tilt)
+    }
+    const start = () => {
+      let box = lastFraming?.box ?? null
+      if (!box) {
+        const set = collectBuild(sourceRef.current)
+        box = set ? set.box.clone().expandByScalar(set.radius * 0.15) : null
+      }
+      fit = box ? fitDistance(controls, box.clone()) : 0
+      moving = true
+      holding = true
+    }
+    const end = () => {
+      holding = false
+    }
+    // The glide after a release (damping) still counts, until the camera comes to rest; a pause
+    // in the middle of a drag does not end it.
+    const rest = () => {
+      follow()
+      if (!holding) moving = false
+    }
+    controls.addEventListener('controlstart', start)
+    controls.addEventListener('controlend', end)
+    controls.addEventListener('update', follow)
+    controls.addEventListener('rest', rest)
+    return () => {
+      controls.removeEventListener('controlstart', start)
+      controls.removeEventListener('controlend', end)
+      controls.removeEventListener('update', follow)
+      controls.removeEventListener('rest', rest)
+    }
+  }, [controls, ready])
 
   // While a build plays with the cinematic camera, the camera is the animation's: dragging up and
   // down only tilts it, and the wheel only zooms it (both through the panel's Tilt and Zoom, so the

@@ -51,21 +51,6 @@ async function recordCamera(page: Page) {
   return () => page.evaluate(() => (window as unknown as { cameraProbe: CameraProbe }).cameraProbe)
 }
 
-test('the controls bar loads its icons from the template origin', async ({ page }) => {
-  const icons = new Map<string, number>()
-  page.on('response', (response) => {
-    const { pathname } = new URL(response.url())
-    if (pathname.startsWith('/icons/')) icons.set(pathname, response.status())
-  })
-  await mockPascal(page, () => ({ body: liveScene() }))
-  await page.goto(`/?project=${PROJECT}`)
-  await expect(page.locator(READY)).toBeVisible({ timeout: 60_000 })
-  await expect(page.getByRole('button', { name: 'Animate', exact: true })).toBeVisible()
-  await expect.poll(() => icons.size).toBeGreaterThan(0)
-  for (const status of icons.values()) expect(status).toBe(200)
-  expect([...icons.keys()].every((path) => /^\/icons\/[a-z]+\.webp$/.test(path))).toBe(true)
-})
-
 test('the opening camera is in place as the loader lifts', async ({ page }) => {
   const camera = await recordCamera(page)
   await mockPascal(page, () => ({ body: liveScene() }))

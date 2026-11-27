@@ -4,7 +4,6 @@ import {
   buildGlbReferenceNodes,
   buildGlbReplaceNodes,
   DroneController,
-  type GlbPickEvent,
   GlbScene,
   type GlbWalkthrough,
   GlbWalkthroughController,
@@ -16,8 +15,6 @@ import {
 } from '@pascal-app/viewer'
 import { initInteractionSounds, useViewerUiSounds } from '@pascal-app/viewer/sfx'
 import {
-  applyViewerClick,
-  applyViewerHover,
   DroneHud,
   type FloorplanPreviewScene,
   parseOpeningCamera,
@@ -26,10 +23,7 @@ import {
   useFirstPersonHud,
   useViewerFloorDisplay,
   ViewerCameraControls,
-  ViewerHoverLabel,
   ViewerOpeningCamera,
-  ViewerRooms,
-  ViewerSelectionManager,
   type ViewerSource,
   ViewerStage,
   type ViewerStageMode,
@@ -53,6 +47,11 @@ import { ErrorBoundary, SceneCrashFallback } from './ErrorBoundary'
  * Two sources, as on the hosted viewer: with a ready bake, the GLB draws the building while
  * interactive items, scans/guides and `bake: 'replace'` plugin kinds are rebuilt live from the
  * published graph; without one, the whole graph is rebuilt live.
+ *
+ * Unlike the hosted viewer it is only an animation viewer: nothing in the 3D scene reacts to the
+ * pointer. No selection manager is mounted (the live scene's `ViewerSelectionManager`, the bake's
+ * `onPick`), and no room highlights or callouts (`ViewerRooms`) and no hover pill
+ * (`ViewerHoverLabel`) are drawn.
  */
 type SceneGraphInput = Parameters<typeof buildGlbInteractiveItems>[0]
 type SetSceneArgs = Parameters<ReturnType<typeof useScene.getState>['setScene']>
@@ -213,10 +212,6 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
       : { nodes: sceneNodes, objectFor: (id) => sceneRegistry.nodes.get(id) },
     [glbUrl, floorplanScene, glbObjects, sceneNodes],
   )
-  const handleGlbPick = useCallback(({ type, pick, modifiers }: GlbPickEvent) => {
-    if (type === 'click') applyViewerClick(pick, floorplanScene.nodes, modifiers)
-    else applyViewerHover(pick, floorplanScene.nodes)
-  }, [floorplanScene])
 
   const embedReady = flags.embed && !loading && (glbUrl ? glbReady : sceneReady) &&
     (openingCamera === null || openingCameraApplied)
@@ -280,6 +275,7 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
                 presentation={glbUrl ? bakedPresentation : undefined}
                 renderContext="viewer"
                 sceneReadyKey={sceneIdentity}
+                // "custom" with none mounted: no hover or selection in the 3D scene.
                 selectionManager="custom"
                 useBvh={false}
               >
@@ -292,8 +288,6 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
                     ready={glbUrl ? glbReady : sceneReady}
                   />
                 )}
-                {!glbUrl && <ViewerSelectionManager />}
-                <ViewerRooms source={viewerSource} />
                 <InteractiveSystem />
                 <BuildAnimator ready={!showSceneLoader && stageMode !== '2d'} source={viewerSource} />
                 {glbUrl && (
@@ -303,7 +297,6 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
                       interactiveItems={glbInteractive}
                       key={runtimeRevision}
                       onObjectsChange={setGlbObjects}
-                      onPick={handleGlbPick}
                       onWalkthroughChange={setGlbWalk}
                       referenceNodes={glbReference}
                       replaceNodes={glbReplace}
@@ -323,7 +316,6 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
               {glbUrl && walkingOnFoot && glbWalk && <GlbWalkthroughHudBridge state={glbWalk} />}
               {parametricWalkthroughActive && <ParametricWalkthroughHud />}
               {droneActive && <ViewerDroneHud />}
-              {stageMode === '3d' && <ViewerHoverLabel nodes={viewerSource.nodes} />}
             </ErrorBoundary>
             {/* Covers the stage while a template's look switches in or out. */}
             <LookCurtain />

@@ -3,7 +3,6 @@ import { playSound } from '@pascal-app/viewer/sfx'
 import type { ViewerStageMode } from '@pascal-app/viewer/ui'
 import { Orbit, Sparkles } from 'lucide-react'
 import { useAnimationStore } from '../animation/store'
-import { CameraMenu } from './CameraMenu'
 import { ViewMenu } from './ViewMenu'
 
 /** Tiny circular progress ring shown around the Animate icon while a build plays. */
@@ -36,7 +35,7 @@ export function ModeDock({ animateOpen, onOpenAnimate, stageMode, onStageModeCha
   onStageModeChange: (mode: ViewerStageMode) => void
   /** The 2D plan can be drawn, so the 3D / 2D / Split menu shows. */
   hasFloorplan: boolean
-  /** Orbit, Animate and the camera menu: 3D only, and not with hideBottomBar. */
+  /** Orbit and Animate: 3D only, and not with hideBottomBar. */
   showModes: boolean
 }) {
   const walkthroughMode = useViewer((s) => s.walkthroughMode)
@@ -102,8 +101,6 @@ export function ModeDock({ animateOpen, onOpenAnimate, stageMode, onStageModeCha
             <span>Animate</span>
           </button>
         </div>
-
-        <CameraMenu />
         </>)}
       </div>
     </div>

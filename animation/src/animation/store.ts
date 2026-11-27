@@ -49,6 +49,8 @@ type AnimationState = {
   setCinematic: (on: boolean) => void
   setZoom: (zoom: number) => void
   setTilt: (tilt: number | null) => void
+  /** The person moved the camera themselves: Zoom and Tilt show where it is now, without framing again. */
+  followCamera: (zoom: number, tilt: number) => void
 }
 
 export const useAnimationStore = create<AnimationState>((set, get) => ({
@@ -92,4 +94,7 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
   setCinematic: (cinematic) => set({ cinematic }),
   setZoom: (zoom) => set({ zoom, framingId: get().framingId + 1 }),
   setTilt: (tilt) => set({ tilt, framingId: get().framingId + 1 }),
+  followCamera: (zoom, tilt) => {
+    if (zoom !== get().zoom || tilt !== get().tilt) set({ zoom, tilt })
+  },
 }))

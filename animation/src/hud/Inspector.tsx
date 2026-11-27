@@ -27,11 +27,9 @@ import {
   CloudSun,
   Cloudy,
   Contrast,
-  Diamond,
   Eye,
   Gauge,
   Layers,
-  Layers2,
   LocateFixed,
   Moon,
   Palette,
@@ -148,8 +146,6 @@ function SceneTab({ glbActive, glbHasScans, glbHasGuides }: {
   glbHasGuides: boolean
 }) {
   const i18n = usePascalI18n()
-  const levelMode = useViewer((s) => s.levelMode)
-  const wallMode = useViewer((s) => s.wallMode)
   const showScans = useViewer((s) => s.showScans)
   const showGuides = useViewer((s) => s.showGuides)
   const followOn = useFollowPascal((s) => s.on)
@@ -157,50 +153,9 @@ function SceneTab({ glbActive, glbHasScans, glbHasGuides }: {
 
   const canShowScans = !glbActive || glbHasScans
   const canShowGuides = !glbActive || glbHasGuides
-  const safeWallMode = wallMode === 'up' || wallMode === 'down' || wallMode === 'cutaway' ? wallMode : 'cutaway'
 
   return (
     <div className="hud-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-      <ControlCard>
-        <SegmentedRow
-          label={i18n._({ id: 'viewer.header.levels', message: 'Levels' })}
-          onChange={(next) => useViewer.getState().setLevelMode(next)}
-          options={[
-            { id: 'stacked', label: i18n._({ id: 'viewer.levels.stacked', message: 'Stacked' }), icon: Layers },
-            { id: 'exploded', label: i18n._({ id: 'viewer.levels.exploded', message: 'Exploded' }), icon: Layers2 },
-            { id: 'solo', label: i18n._({ id: 'viewer.levels.solo', message: 'Solo' }), icon: Diamond },
-          ]}
-          value={levelMode === 'manual' ? 'stacked' : levelMode}
-        />
-        {levelMode === 'manual' && (
-          <div className="flex items-center justify-between text-xs text-[var(--glass-muted)]">
-            <span>Custom floor visibility is active.</span>
-            <button
-              className="rounded-full font-medium text-[var(--glass-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)]"
-              onClick={() => useViewer.getState().setLevelMode('stacked')}
-              type="button"
-            >
-              Reset to stacked
-            </button>
-          </div>
-        )}
-      </ControlCard>
-
-      {!glbActive && (
-        <ControlCard>
-          <SegmentedRow
-            label="Walls"
-            onChange={(next) => useViewer.getState().setWallMode(next)}
-            options={[
-              { id: 'up', label: i18n._({ id: 'viewer.walls.fullHeight', message: 'Full height' }) },
-              { id: 'cutaway', label: i18n._({ id: 'viewer.walls.cutaway', message: 'Cutaway' }) },
-              { id: 'down', label: i18n._({ id: 'viewer.walls.low', message: 'Low' }) },
-            ]}
-            value={safeWallMode}
-          />
-        </ControlCard>
-      )}
-
       {(canShowScans || canShowGuides) && (
         <ControlCard>
           <SectionLabel>{i18n._({ id: 'viewer.visibility.title', message: 'Visibility' })}</SectionLabel>
