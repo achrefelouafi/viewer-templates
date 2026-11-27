@@ -147,7 +147,7 @@ Vercel, Cloudflare Pages and other static hosts work too.
 ## Viewer settings
 
 A project's managers can choose how this viewer opens their project, and every later visitor
-gets it. A manager sees a **Customize** tab in the bottom-right corner (or opens it from Pascal's Share
+gets it. A manager sees a **Customize** tab in the bottom-left corner (or opens it from Pascal's Share
 popover). Its panel edits the guided tour's route (reorder the rooms on each floor, skip rooms,
 start the tour on arrival) and the opening camera, time of day and walls, then **Save**.
 A project with nothing saved tours its rooms in the viewer's own order. Settings are saved per project and viewer and are

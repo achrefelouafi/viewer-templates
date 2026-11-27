@@ -756,9 +756,9 @@ main[data-scene-ready="true"] .ui-enter-up {
 }
 
 /* ── Customize panel (src/pascal-react/settings-panel.css), a project's managers only ──
-   Collapsed, a pill in the bottom-right corner (lifted above the plan's zoom controls in 2D and
-   split view); open, a panel docked on the left that slides in from the left, so the Explore
-   panel and its rooms on the right stay in view while customising. Phones keep the pill at the
+   Collapsed, a pill in the bottom-left corner beside the compass, on the side the panel opens;
+   open, a panel docked on the left that slides in from the left, so the Explore panel and its
+   rooms on the right stay in view while customising. Phones keep the pill at the
    top left (their bottom bar owns the bottom) and the shared sheet across the bottom. Colours follow the viewer's light and dark themes; solid card colours, no
    blur over the canvas. The shared stylesheet places it on the right; the overrides below move it
    without touching that shared file (`:root` outranks it, as it loads later). */
@@ -792,9 +792,8 @@ main[data-scene-ready="true"] .ui-enter-up {
   transform: none;
 }
 @media (min-width: 768px) {
-  :root .pascal-settings-tab-wrap { top: auto; left: auto; right: 24px; bottom: 24px; }
-  /* The 2D plan's zoom and fit pill holds the bottom-right corner in 2D and split view. */
-  :root main:not([data-stage-mode="3d"]) .pascal-settings-tab-wrap { bottom: 84px; }
+  /* Beside the compass (12px in, 32px wide), centred on it; the left side stays clear in 2D and split view. */
+  :root .pascal-settings-tab-wrap { top: auto; left: 56px; bottom: 10px; }
 }
 @media (min-width: 561px) {
   :root .pascal-settings-panel {

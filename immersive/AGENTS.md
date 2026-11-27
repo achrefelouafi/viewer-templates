@@ -133,8 +133,8 @@ tour's route (which rooms, in which order, and whether it starts by itself) and 
   view**, Camera with **Use current** and **Clear**, Time of day and, live only, Walls. Choosing a time or walls
   shows it on screen. The popovers change the screen, never the draft; when the screen differs
   from what Save keeps, the panel says so ("On screen now: …").
-- The tab sits in the bottom-right corner (lifted above the plan's zoom pill in 2D and split
-  view) and the panel docks on the left, so the Explore panel and its rooms on the right stay in
+- The tab sits in the bottom-left corner beside the compass, on the side the panel docks: the
+  panel docks on the left, so the Explore panel and its rooms on the right stay in
   view while customising (`styles.css` overrides the shared stylesheet's right-hand placement);
   phones keep the tab at the top left and the sheet across the bottom. Both step aside during the tour, a walkthrough, VR and AR. Colours follow the light and
   dark themes.
