@@ -31,6 +31,12 @@ type AnimationState = {
   zoom: number
   /** The camera's tilt in degrees from straight down, or null for each template's own. */
   tilt: number | null
+  /**
+   * How far the Zoom and Tilt sliders reach: as far as the camera itself goes (Pascal's distance and
+   * angle limits, as zoom against the current framing, and in degrees). Kept up to date by the animator.
+   */
+  zoomRange: [number, number]
+  tiltRange: [number, number]
   /** Bumped when zoom or tilt changes, so the animator frames again at once. */
   framingId: number
   /**
@@ -51,6 +57,7 @@ type AnimationState = {
   setTilt: (tilt: number | null) => void
   /** The person moved the camera themselves: Zoom and Tilt show where it is now, without framing again. */
   followCamera: (zoom: number, tilt: number) => void
+  setRanges: (zoom: [number, number], tilt: [number, number]) => void
 }
 
 export const useAnimationStore = create<AnimationState>((set, get) => ({
@@ -67,6 +74,8 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
   panelOpen: false,
   zoom: 1,
   tilt: null,
+  zoomRange: [0.5, 2],
+  tiltRange: [5, 85],
   framingId: 0,
   appliedLook: 'default',
 
@@ -94,6 +103,12 @@ export const useAnimationStore = create<AnimationState>((set, get) => ({
   setCinematic: (cinematic) => set({ cinematic }),
   setZoom: (zoom) => set({ zoom, framingId: get().framingId + 1 }),
   setTilt: (tilt) => set({ tilt, framingId: get().framingId + 1 }),
+  setRanges: (zoomRange, tiltRange) => {
+    const { zoomRange: z, tiltRange: t } = get()
+    if (z[0] !== zoomRange[0] || z[1] !== zoomRange[1] || t[0] !== tiltRange[0] || t[1] !== tiltRange[1]) {
+      set({ zoomRange, tiltRange })
+    }
+  },
   followCamera: (zoom, tilt) => {
     if (zoom !== get().zoom || tilt !== get().tilt) set({ zoom, tilt })
   },

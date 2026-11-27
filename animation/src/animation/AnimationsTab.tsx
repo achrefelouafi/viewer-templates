@@ -187,6 +187,14 @@ export function AnimationsPanel({ ready }: {
   const pieceCount = useAnimationStore((s) => s.pieceCount)
   const zoom = useAnimationStore((s) => s.zoom)
   const tilt = useAnimationStore((s) => s.tilt)
+  // As far as the camera itself goes, so the sliders and the wheel or drag always agree.
+  const zoomRange = useAnimationStore((s) => s.zoomRange)
+  const tiltRange = useAnimationStore((s) => s.tiltRange)
+  const zoomMin = Math.round(zoomRange[0] * 100)
+  const zoomMax = Math.max(zoomMin + 1, Math.round(zoomRange[1] * 100))
+  const zoomValue = Math.min(zoomMax, Math.max(zoomMin, Math.round(zoom * 100)))
+  const tiltValue = Math.min(tiltRange[1], Math.max(tiltRange[0], tilt ?? 58))
+  const share = (value: number, min: number, max: number) => `${((value - min) / Math.max(1, max - min)) * 100}%`
   const store = useAnimationStore.getState()
   const running = status === 'playing' || status === 'paused'
   const active = TEMPLATES.find((t) => t.id === template) ?? TEMPLATES[0]!
@@ -248,22 +256,22 @@ export function AnimationsPanel({ ready }: {
         <div className="flex flex-col gap-2 rounded-2xl border border-[var(--glass-border)] bg-[var(--glass-raised-soft)] p-3">
           <div className="flex items-center justify-between gap-2">
             <span className="font-semibold text-[11px] text-[var(--glass-muted)] uppercase tracking-[0.12em]">Camera</span>
-            <span className="text-[11px] text-[var(--glass-muted)]">5° top · 85° low</span>
+            <span className="text-[11px] text-[var(--glass-muted)]">{tiltRange[0]}° top · {tiltRange[1]}° low</span>
           </div>
           <label className="flex items-center gap-2.5 text-xs">
             <span className="w-9 shrink-0 font-medium text-[var(--glass-muted)]">Zoom</span>
             <input
               aria-label="Camera zoom"
               className="anim-scrub w-full cursor-pointer"
-              max={200}
-              min={50}
+              max={zoomMax}
+              min={zoomMin}
               onChange={(event) => store.setZoom(Number(event.target.value) / 100)}
-              style={{ ['--anim-accent' as string]: active.accent, ['--anim-progress' as string]: `${((zoom * 100 - 50) / 150) * 100}%` }}
+              style={{ ['--anim-accent' as string]: active.accent, ['--anim-progress' as string]: share(zoomValue, zoomMin, zoomMax) }}
               type="range"
-              value={Math.round(zoom * 100)}
+              value={zoomValue}
             />
             <span className="min-w-[3.25rem] shrink-0 rounded-full bg-[var(--glass-bg-subtle)] px-2 py-0.5 text-center font-mono text-[11px] text-[var(--glass-muted)] tabular-nums">
-              {Math.round(zoom * 100)}%
+              {zoomValue}%
             </span>
           </label>
           <label className="flex items-center gap-2.5 text-xs">
@@ -271,12 +279,12 @@ export function AnimationsPanel({ ready }: {
             <input
               aria-label="Camera tilt"
               className="anim-scrub w-full cursor-pointer"
-              max={85}
-              min={5}
+              max={tiltRange[1]}
+              min={tiltRange[0]}
               onChange={(event) => store.setTilt(Number(event.target.value))}
-              style={{ ['--anim-accent' as string]: active.accent, ['--anim-progress' as string]: `${(((tilt ?? 58) - 5) / 80) * 100}%` }}
+              style={{ ['--anim-accent' as string]: active.accent, ['--anim-progress' as string]: share(tiltValue, tiltRange[0], tiltRange[1]) }}
               type="range"
-              value={tilt ?? 58}
+              value={tiltValue}
             />
             <button
               className={`studio-interactive min-w-[3.25rem] shrink-0 rounded-full border px-2 py-0.5 text-center font-mono text-[11px] tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent)] ${

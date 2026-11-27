@@ -643,6 +643,11 @@ function createKit(palette: Palette) {
   // The site's ground in the Noir near-black, whatever finish the project gives it, lighter in the
   // middle of the screen: a soft light the plan stands in front of, wherever the camera goes.
   const ground = new MeshStandardNodeMaterial({ color: palette.ground, roughness: 1, metalness: 0 })
+  // Pushed back in depth as Pascal's own ground is, so what lies flat on it (the ground floor's
+  // paper) never sinks into it.
+  ground.polygonOffset = true
+  ground.polygonOffsetFactor = 2
+  ground.polygonOffsetUnits = 4
   const groundEdge = uniform(new THREE.Color(palette.ground))
   const groundGlow = uniform(new THREE.Color(palette.glow))
   const fromMiddle = length(screenUV.sub(0.5).mul(vec2(screenSize.x.div(screenSize.y), 1)))

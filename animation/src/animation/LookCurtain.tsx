@@ -19,7 +19,35 @@ const FADE_COVER_MS = 650
 const SETTLE_MS = 160
 const REVEAL_MS = 420
 /** The fade back out onto the viewer's own look. */
-const FADE_REVEAL_MS = 750
+const FADE_REVEAL_MS = 900
+/**
+ * Back to the viewer's own look, the curtain stays shut until the scene has really come back:
+ * Pascal's daylight (its sky, lights and the materials' shaders) takes a while to build after the
+ * switch, and a curtain lifted early showed the Noir background, then the scene popping in. It waits
+ * at least `BACK_MIN_MS`, then for `BACK_SMOOTH_FRAMES` frames in a row drawn without a stall, and
+ * never longer than `BACK_MAX_MS`.
+ */
+const BACK_MIN_MS = 700
+const BACK_SMOOTH_FRAMES = 12
+const BACK_MAX_MS = 3000
+/** A frame slower than this is the scene still building (shaders, the sky). */
+const STALL_MS = 45
+
+/** Calls `done` once the page has drawn smoothly for a while after the look switched back. */
+function whenSettled(alive: () => boolean, done: () => void) {
+  const start = performance.now()
+  let last = start
+  let smooth = 0
+  const frame = (now: number) => {
+    if (!alive()) return
+    smooth = now - last < STALL_MS ? smooth + 1 : 0
+    last = now
+    const waited = now - start
+    if ((waited >= BACK_MIN_MS && smooth >= BACK_SMOOTH_FRAMES) || waited >= BACK_MAX_MS) done()
+    else requestAnimationFrame(frame)
+  }
+  requestAnimationFrame(frame)
+}
 
 type Phase = 'open' | 'closing' | 'closed' | 'opening'
 
@@ -47,10 +75,12 @@ export function LookCurtain() {
     later(fading ? FADE_COVER_MS : COVER_MS, () => {
       setPhase('closed')
       useAnimationStore.setState({ appliedLook: wanted })
-      later(SETTLE_MS, () => {
+      const reveal = () => {
         setPhase('opening')
         later(fading ? FADE_REVEAL_MS : REVEAL_MS, () => setPhase('open'))
-      })
+      }
+      if (fading) whenSettled(() => token.current === mine, reveal)
+      else later(SETTLE_MS, reveal)
     })
     // No cleanup: switching the look re-runs this effect, and the curtain must still open. A newer
     // switch takes over through `token` (the old timers then do nothing).

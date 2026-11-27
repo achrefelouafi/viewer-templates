@@ -169,16 +169,25 @@ rules are in [listing's AGENTS.md](../listing/AGENTS.md#sign-in-with-pascal). In
   back on.
 - **Zoom and Tilt follow the camera**: when the person orbits or zooms it themselves, the panel's
   sliders read it back (`followCamera` in the store: tilt is the polar angle, zoom the fit distance
-  of the last framing over the camera's distance) without framing again. Only the person's moves
-  count (camera-controls' `controlstart` to `rest`), never a framing's own glide.
+  of the last framing over the camera's distance) without framing again. Every camera `update`
+  counts except a framing's own glide (`framing`, from `frameBox` until `rest` or the person's
+  next pointer or wheel) and the locked cinematic camera's. Don't key this on camera-controls'
+  `controlstart`: the wheel sends none.
+- **The sliders reach as far as the camera does**: the camera keeps Pascal's own limits
+  (`ViewerCameraControls`: 5 to 100 m, polar 0 to about 84°), and `publishRanges` turns them into
+  the store's `zoomRange` (against the current framing's fit distance) and `tiltRange`, which size the
+  Zoom and Tilt sliders and clamp the cinematic drag and wheel. Don't cap the camera to the sliders.
 - **Blueprint plays in the Noir look** (`look: 'noir'`): `NoirLook.tsx` is the Home Assistant
   viewer's `HomeNoir` wireframe (frosted walls, edges with coplanar seams merged, grey-glow ground),
   and the viewer turns Pascal's daylight off while it is on (`useNoirActive`). Each floor gets a
   `PaperSheet` (`paper.tsx`) printed with that floor's plan from Pascal's own `def.floorplan`
-  geometry and named as the navigator names it; it unfolds, the floor extrudes out of it, and
+  geometry and named as the navigator names it (the ground floor's is kept 2 cm over the site's
+  ground under it, terrain included, by `groundTopUnder`; the paper is pulled forward in depth and
+  Noir's ground pushed back, as Pascal's own is); it unfolds, the floor extrudes out of it, and
   `ink.ts` develops the floor into colour. The look switches in and out behind `LookCurtain.tsx` (the
   Noir background over the stage, as CSS: a circle growing from the middle on the way in, a fade
-  over the finished building on the way out; `appliedLook` in the store follows what the build
+  over the finished building on the way out, held shut until Pascal's daylight has redrawn
+  smoothly (`whenSettled`) and then faded off; `appliedLook` in the store follows what the build
   wants once covered), and a finished build holds a beat, then switches back and is put back.
 - **Heavy animations are prepared ahead** (`Precompiler.tsx`, mounted by `BuildAnimator`): a moment
   after the project appears, in slices of a few milliseconds a frame, it draws Blueprint's floor

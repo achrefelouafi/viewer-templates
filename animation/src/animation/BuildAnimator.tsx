@@ -9,7 +9,7 @@ import { BlueprintLines, DustPool, GroundWaves, RoomFloors } from './effects'
 import { type BuildElement, type BuildSet, collectBuild } from './elements'
 import { clearFloorInk, floorInk, setFloorInk } from './ink'
 import { NoirLook } from './NoirLook'
-import { PaperSheet } from './paper'
+import { groundTopUnder, PaperSheet } from './paper'
 import { Precompiler } from './Precompiler'
 import { arrivalOf, createPose, poseAt, poseMatrix } from './poses'
 import { useAnimationStore } from './store'
@@ -196,6 +196,15 @@ function startRun(source: ViewerSource, scene: THREE.Scene, levelName: LevelName
     const named = levelName(plan.levelId)
     if (named) plan.title = named
     const paper = new PaperSheet(plan, source.nodes as unknown as Record<string, unknown>, level.object)
+    // The ground floor's sheet lies on the site: kept a little above the ground under it, terrain
+    // included, so it never disappears beneath it.
+    if (plan.storey === 0) {
+      const ground = groundTopUnder(paper.box, scene)
+      if (Number.isFinite(ground)) {
+        plan.rest = Math.max(plan.rest, ground + 0.02)
+        plan.top = Math.max(plan.top, plan.rest)
+      }
+    }
     scene.add(paper.group)
     papers.push(paper)
   }
@@ -243,6 +252,8 @@ function frameBuild(controls: Controls, set: BuildSet, spread: number) {
 }
 
 let lastFraming: { box: THREE.Box3; polar: number } | null = null
+/** A framing's glide is under way: the camera moves, but not by the person's hand. */
+let framing = false
 
 const _sphere = new THREE.Sphere()
 
@@ -255,8 +266,11 @@ const _sphere = new THREE.Sphere()
  */
 function frameBox(controls: Controls, box: THREE.Box3, polar: number) {
   lastFraming = { box: box.clone(), polar }
+  framing = true
   const { zoom, tilt } = useAnimationStore.getState()
-  const distance = fitDistance(controls, box) / Math.max(0.2, zoom)
+  const fit = fitDistance(controls, box)
+  publishRanges(controls, fit)
+  const distance = fit / Math.max(0.2, zoom)
   const angle = THREE.MathUtils.clamp(tilt !== null ? THREE.MathUtils.degToRad(tilt) : polar, 0.03, Math.PI / 2 - 0.02)
   controls.moveTo(_sphere.center.x, _sphere.center.y, _sphere.center.z, true)
   controls.rotatePolarTo(angle, true)
@@ -276,6 +290,25 @@ function fitDistance(controls: Controls, box: THREE.Box3): number {
   return (_sphere.radius / Math.sin(fov / 2)) * 1.05
 }
 
+/**
+ * Tells the panel how far its Zoom and Tilt sliders reach: as far as the camera itself goes
+ * (Pascal's `minDistance`/`maxDistance` and polar limits), measured against a framing that fits at
+ * `fit`. The camera's limits stay Pascal's; the sliders follow them.
+ */
+function publishRanges(controls: Controls, fit: number) {
+  if (!(fit > 0)) return
+  const zoom: [number, number] = [
+    Math.ceil((fit / Math.max(1e-3, controls.maxDistance)) * 100) / 100,
+    Math.floor((fit / Math.max(1e-3, controls.minDistance)) * 100) / 100,
+  ]
+  const tilt: [number, number] = [
+    Math.ceil(THREE.MathUtils.radToDeg(controls.minPolarAngle)),
+    Math.floor(THREE.MathUtils.radToDeg(Math.min(controls.maxPolarAngle, Math.PI / 2 - 0.02))),
+  ]
+  if (zoom[1] < zoom[0]) zoom[1] = zoom[0]
+  useAnimationStore.getState().setRanges(zoom, tilt)
+}
+
 /** Spread around the build that the opening framing leaves room for: the storm. */
 const FRAMING_SPREAD: Record<string, number> = { magnetic: 0.6 }
 
@@ -293,6 +326,7 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
   const scene = useThree((state) => state.scene)
   const controls = useThree((state) => state.controls) as Controls | null
   const invalidate = useThree((state) => state.invalidate)
+  const canvas = useThree((state) => state.gl.domElement)
   const runRef = useRef<Run | null>(null)
   const runId = useAnimationStore((state) => state.runId)
   const status = useAnimationStore((state) => state.status)
@@ -371,53 +405,63 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
 
   // The person orbits, tilts or zooms the camera themselves (whenever its own input is on): the
   // panel's Zoom and Tilt follow it, read off the camera against the framing it last had (the
-  // build's, at zoom 1). Only moves the person makes count: a framing's own glide changes nothing.
+  // build's, at zoom 1). Every camera update counts except a framing's own glide (`framing`, until
+  // it comes to rest or the person takes over) and the cinematic camera's, whose drag and wheel
+  // already go through the sliders. (camera-controls sends no `controlstart` for the wheel, so
+  // its control events can't tell the person's moves apart.)
   useEffect(() => {
     if (!controls || !ready) return
-    let moving = false
-    let holding = false
-    let fit = 0
-    const follow = () => {
-      if (!moving || fit <= 0) return
-      const zoom = THREE.MathUtils.clamp(Math.round((fit / Math.max(1e-3, controls.distance)) * 100) / 100, 0.5, 2)
-      const tilt = THREE.MathUtils.clamp(Math.round(THREE.MathUtils.radToDeg(controls.polarAngle)), 5, 85)
-      useAnimationStore.getState().followCamera(zoom, tilt)
-    }
-    const start = () => {
+    let buildBox: THREE.Box3 | null = null
+    // The framing Zoom is measured against: the last one, or the whole build at zoom 1.
+    const currentFit = () => {
       let box = lastFraming?.box ?? null
       if (!box) {
-        const set = collectBuild(sourceRef.current)
-        box = set ? set.box.clone().expandByScalar(set.radius * 0.15) : null
+        if (!buildBox) {
+          const set = collectBuild(sourceRef.current)
+          if (!set) return 0
+          buildBox = set.box.clone().expandByScalar(set.radius * 0.15)
+        }
+        box = buildBox
       }
-      fit = box ? fitDistance(controls, box.clone()) : 0
-      moving = true
-      holding = true
+      return fitDistance(controls, box.clone())
     }
-    const end = () => {
-      holding = false
+    const follow = () => {
+      if (framing) return
+      const state = useAnimationStore.getState()
+      if (state.cinematic && (state.status === 'playing' || state.status === 'paused')) return
+      const fit = currentFit()
+      if (!(fit > 0)) return
+      publishRanges(controls, fit)
+      const { zoomRange, tiltRange } = useAnimationStore.getState()
+      const zoom = THREE.MathUtils.clamp(Math.round((fit / Math.max(1e-3, controls.distance)) * 100) / 100, zoomRange[0], zoomRange[1])
+      const tilt = THREE.MathUtils.clamp(Math.round(THREE.MathUtils.radToDeg(controls.polarAngle)), tiltRange[0], tiltRange[1])
+      state.followCamera(zoom, tilt)
     }
-    // The glide after a release (damping) still counts, until the camera comes to rest; a pause
-    // in the middle of a drag does not end it.
-    const rest = () => {
-      follow()
-      if (!holding) moving = false
+    const settled = () => {
+      framing = false
     }
-    controls.addEventListener('controlstart', start)
-    controls.addEventListener('controlend', end)
+    // The person's own input ends a framing's glide: from then on the camera is theirs.
+    const takeOver = () => {
+      framing = false
+    }
+    publishRanges(controls, currentFit())
     controls.addEventListener('update', follow)
-    controls.addEventListener('rest', rest)
+    controls.addEventListener('rest', settled)
+    controls.addEventListener('sleep', settled)
+    canvas.addEventListener('pointerdown', takeOver, true)
+    canvas.addEventListener('wheel', takeOver, { capture: true, passive: true })
     return () => {
-      controls.removeEventListener('controlstart', start)
-      controls.removeEventListener('controlend', end)
       controls.removeEventListener('update', follow)
-      controls.removeEventListener('rest', rest)
+      controls.removeEventListener('rest', settled)
+      controls.removeEventListener('sleep', settled)
+      canvas.removeEventListener('pointerdown', takeOver, true)
+      canvas.removeEventListener('wheel', takeOver, true)
     }
-  }, [controls, ready])
+  }, [controls, ready, canvas])
 
   // While a build plays with the cinematic camera, the camera is the animation's: dragging up and
   // down only tilts it, and the wheel only zooms it (both through the panel's Tilt and Zoom, so the
   // sliders follow). Once the build has finished or stopped, the camera is free again.
-  const canvas = useThree((state) => state.gl.domElement)
   const cinematic = useAnimationStore((state) => state.cinematic)
   const locked = cinematic && (status === 'playing' || status === 'paused')
   useEffect(() => {
@@ -438,7 +482,8 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
       if (!dragging || event.pointerId !== dragging.id) return
       if (Math.abs(event.clientY - dragging.y) > 4) dragging.moved = true
       // Down the screen looks from higher up, as an orbit drag does.
-      const tilt = THREE.MathUtils.clamp(Math.round(dragging.tilt - (event.clientY - dragging.y) * 0.3), 5, 85)
+      const { tiltRange } = useAnimationStore.getState()
+      const tilt = THREE.MathUtils.clamp(Math.round(dragging.tilt - (event.clientY - dragging.y) * 0.3), tiltRange[0], tiltRange[1])
       if (tilt !== useAnimationStore.getState().tilt) useAnimationStore.getState().setTilt(tilt)
     }
     const up = (event: PointerEvent) => {
@@ -456,8 +501,8 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
     }
     const wheel = (event: WheelEvent) => {
       event.preventDefault()
-      const { zoom, setZoom } = useAnimationStore.getState()
-      setZoom(THREE.MathUtils.clamp(Math.round(zoom * (1 - event.deltaY * 0.001) * 100) / 100, 0.5, 2))
+      const { zoom, setZoom, zoomRange } = useAnimationStore.getState()
+      setZoom(THREE.MathUtils.clamp(Math.round(zoom * (1 - event.deltaY * 0.001) * 100) / 100, zoomRange[0], zoomRange[1]))
     }
     canvas.addEventListener('pointerdown', down)
     window.addEventListener('pointermove', move)

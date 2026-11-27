@@ -2,7 +2,7 @@ import {
   buildFloorplanContext, floorplanLayerRank, hidesDescendants, isNodeKindEnabled, nodeRegistry,
 } from '@pascal-app/core'
 import { AnyNode as AnyNodeSchema } from '@pascal-app/core/schema'
-import { useViewer } from '@pascal-app/viewer'
+import { SITE_GROUND, useViewer } from '@pascal-app/viewer'
 import { FloorplanGeometryRenderer } from '@pascal-app/viewer/ui'
 import type { ReactElement } from 'react'
 import { flushSync } from 'react-dom'
@@ -238,6 +238,10 @@ function sheetFor(plan: PaperPlan, nodes: Record<string, unknown>): Sheet {
   for (const material of [front, back]) {
     material.userData.__tourNoir = true
     material.maskNode = notWarmup()
+    // Pulled forward in depth: lying flat on the ground (or a slab), the paper always wins.
+    material.polygonOffset = true
+    material.polygonOffsetFactor = -1
+    material.polygonOffsetUnits = -4
   }
   const sheet = { texture, front, back }
   sheets.set(key, sheet)
@@ -423,14 +427,16 @@ export class PaperSheet {
     const y = p.top + (p.rest - p.top) * sink
     this.lift.position.y = DROP * (1 - fall * fall)
 
-    // The accordion across, then the half over, each with a little flap past flat.
+    // The accordion across, then the half over. Each fold lands with the ease of its flap but
+    // stops at flat: past flat a panel would swing down through the ground (or the floor below)
+    // by a good part of its width, and vanish into it.
     const across = clamp01((time - p.land) / Math.max(0.01, p.open - p.land))
     const over = clamp01((time - p.open) / Math.max(0.01, p.flat - p.open))
-    const accordion = FOLDED * (1 - (across <= 0 ? 0 : backOut(across)))
+    const accordion = Math.max(0, FOLDED * (1 - (across <= 0 ? 0 : backOut(across))))
     this.columns.forEach((column, i) => {
       column.rotation.z = i === 0 ? 0 : (i % 2 === 1 ? 1 : -1) * accordion
     })
-    const half = FOLDED * (1 - (over <= 0 ? 0 : backOut(over)))
+    const half = Math.max(0, FOLDED * (1 - (over <= 0 ? 0 : backOut(over))))
     for (const hinge of this.hinges) hinge.rotation.x = half
 
     // Placed in the level's frame: plan x and y are the level's x and z.
@@ -464,3 +470,33 @@ export class PaperSheet {
 }
 
 const _place = new THREE.Matrix4()
+const _vertex = new THREE.Vector3()
+const _meshBox = new THREE.Box3()
+
+/**
+ * The top of the site's ground under `box` (world x and z), or -Infinity where there is none: the
+ * highest of its vertices inside the box, or, for a flat ground with no vertex inside (one big
+ * quad), the ground's own height. A terrain that rises under the sheet would otherwise cover it.
+ */
+export function groundTopUnder(box: THREE.Box3, scene: THREE.Object3D): number {
+  let top = -Infinity
+  scene.traverse((object) => {
+    const mesh = object as THREE.Mesh
+    if (!mesh.isMesh || object.userData?.[SITE_GROUND] !== 'solid') return
+    const position = mesh.geometry?.getAttribute('position')
+    if (!position) return
+    mesh.updateWorldMatrix(true, false)
+    _meshBox.setFromObject(mesh)
+    if (_meshBox.max.x < box.min.x || _meshBox.min.x > box.max.x || _meshBox.max.z < box.min.z || _meshBox.min.z > box.max.z) return
+    let inside = false
+    for (let i = 0; i < position.count; i++) {
+      _vertex.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld)
+      if (_vertex.x < box.min.x || _vertex.x > box.max.x || _vertex.z < box.min.z || _vertex.z > box.max.z) continue
+      inside = true
+      if (_vertex.y > top) top = _vertex.y
+    }
+    // A flat ground (a few big triangles) has no vertex under the sheet: its height is its own.
+    if (!inside && _meshBox.max.y - _meshBox.min.y < 0.5) top = Math.max(top, _meshBox.max.y)
+  })
+  return top
+}
