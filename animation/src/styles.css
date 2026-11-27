@@ -1,0 +1,47 @@
+@import "tailwindcss";
+@import "@pascal-app/viewer/ui/theme.css";
+@import "@fontsource/barlow/400.css";
+@import "@fontsource/barlow/500.css";
+@import "@fontsource/barlow/600.css";
+@import "@fontsource/barlow/700.css";
+@import "@fontsource-variable/geist-mono/wght.css";
+@source "../node_modules/@pascal-app/viewer/dist/ui";
+@source "../node_modules/@pascal-app/plugin-*/src";
+@source "./";
+
+/* The hosted viewer's type: Barlow, Geist Mono for figures (the sky clock, room areas). */
+@theme inline {
+  --font-sans: "Barlow", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+}
+html, body, #root { height: 100%; margin: 0; }
+body { @apply bg-background text-foreground font-sans; text-wrap: pretty; }
+
+/* Animations tab: template glyphs that loop, a thin scrubber in the template's accent. */
+.anim-strip { scrollbar-width: none; }
+.anim-strip::-webkit-scrollbar { display: none; }
+.anim-glyph { width: 40px; height: 28px; overflow: visible; }
+.anim-draw { stroke-dasharray: 160; animation: anim-draw 2.6s ease-in-out infinite; }
+@keyframes anim-draw { 0% { stroke-dashoffset: 160; } 60%, 100% { stroke-dashoffset: 0; } }
+.anim-tilt { transform-box: fill-box; transform-origin: 0% 100%; animation: anim-tilt 2.2s ease-in-out infinite; }
+@keyframes anim-tilt { 0%, 15% { transform: rotate(0deg); } 55%, 100% { transform: rotate(-90deg) translateY(0); } }
+.anim-fall { animation: anim-fall 1.6s cubic-bezier(.55,0,.85,.4) infinite; }
+@keyframes anim-fall { 0% { transform: translateY(-4px); opacity: 0; } 15% { opacity: 1; } 70% { transform: translateY(18px); } 78% { transform: translateY(16px); } 86%, 100% { transform: translateY(18px); } }
+.anim-snap-a { animation: anim-snap-a 2.4s ease-in-out infinite; }
+.anim-snap-b { animation: anim-snap-b 2.4s ease-in-out infinite; }
+.anim-snap-c { animation: anim-snap-c 2.4s ease-in-out infinite; }
+@keyframes anim-snap-a { 0%, 20% { transform: translate(-7px, 5px) rotate(-12deg); } 65%, 100% { transform: none; } }
+@keyframes anim-snap-b { 0%, 25% { transform: translate(8px, 6px) rotate(14deg); } 70%, 100% { transform: none; } }
+@keyframes anim-snap-c { 0%, 30% { transform: translate(0, -6px); } 75%, 100% { transform: none; } }
+.anim-ring { transform-box: fill-box; transform-origin: center; animation: anim-ring 2s ease-out infinite; }
+.anim-ring-2 { animation-delay: 1s; }
+@keyframes anim-ring { 0% { transform: scale(0.1); opacity: 1; } 100% { transform: scale(1.1); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .anim-glyph * { animation: none !important; } }
+
+.anim-scrub { appearance: none; background: linear-gradient(to right, var(--anim-accent) var(--anim-progress), color-mix(in oklab, currentColor 18%, transparent) var(--anim-progress)); border-radius: 999px; }
+.anim-scrub::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; border-radius: 999px; background: var(--anim-accent); border: 2px solid var(--background, #fff); box-shadow: 0 1px 3px rgb(0 0 0 / .3); }
+.anim-scrub::-moz-range-thumb { width: 10px; height: 10px; border-radius: 999px; background: var(--anim-accent); border: 2px solid var(--background, #fff); }
