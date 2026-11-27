@@ -4,7 +4,9 @@ Pascal's hosted 3D viewer, unchanged, with one addition: an **Animations** tab d
 edge that plays the house being built. Pick a template and every slab, wall, opening, roof and
 piece of furniture arrives on its own timeline; scrub, pause, replay, change speed or let the
 cinematic camera orbit while it builds. Zoom and Tilt in the panel set how close and from how high
-the camera frames the build (Tilt: Auto keeps each template's own angle).
+the camera frames the build (Tilt: Auto keeps each template's own angle). While a build plays with the cinematic camera,
+dragging up and down tilts the camera and the wheel zooms it; once it has finished, the camera is
+free again.
 
 | Template | What it does |
 | --- | --- |

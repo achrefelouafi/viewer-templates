@@ -155,5 +155,9 @@ rules are in [listing's AGENTS.md](../listing/AGENTS.md#sign-in-with-pascal). In
   either side of 45 degrees flipped the view. `frameBox` keeps the azimuth, looks at the box's
   bounding sphere and stands back to hold it; the panel's Zoom divides that distance and its Tilt
   (or each template's own) sets the polar angle.
+- **The camera is the animation's while a cinematic build plays**: camera-controls' input is off
+  (`enabled = false`; scripted moves still run), a vertical drag sets Tilt and the wheel sets Zoom,
+  and the click that ends a drag is swallowed so it selects nothing. Finished or stopped, input is
+  back on.
 - **Overlays use single-sided node materials** and never raycast: a double-sided node material in
   Pascal's MRT scene pass breaks the WebGPU render context.

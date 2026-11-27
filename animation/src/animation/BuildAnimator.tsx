@@ -402,15 +402,67 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
     invalidate()
   }, [framingId, controls, ready, invalidate])
 
-  // The person grabbing the camera ends the cinematic orbit for this run.
+  // While a build plays with the cinematic camera, the camera is the animation's: dragging up and
+  // down only tilts it, and the wheel only zooms it (both through the panel's Tilt and Zoom, so the
+  // sliders follow). Once the build has finished or stopped, the camera is free again.
+  const canvas = useThree((state) => state.gl.domElement)
+  const cinematic = useAnimationStore((state) => state.cinematic)
+  const locked = cinematic && (status === 'playing' || status === 'paused')
   useEffect(() => {
-    if (!controls) return
-    const take = () => {
-      if (runRef.current) runRef.current.cameraTaken = true
+    if (!controls || !locked) return
+    const wasEnabled = controls.enabled
+    controls.enabled = false
+    let dragging: { id: number; y: number; tilt: number; moved: boolean } | null = null
+    let swallowClick = false
+    const currentTilt = () => {
+      const { tilt } = useAnimationStore.getState()
+      return tilt ?? Math.round(THREE.MathUtils.radToDeg(controls.polarAngle))
     }
-    controls.addEventListener('controlstart', take)
-    return () => controls.removeEventListener('controlstart', take)
-  }, [controls])
+    const down = (event: PointerEvent) => {
+      dragging = { id: event.pointerId, y: event.clientY, tilt: currentTilt(), moved: false }
+      swallowClick = false
+    }
+    const move = (event: PointerEvent) => {
+      if (!dragging || event.pointerId !== dragging.id) return
+      if (Math.abs(event.clientY - dragging.y) > 4) dragging.moved = true
+      // Down the screen looks from higher up, as an orbit drag does.
+      const tilt = THREE.MathUtils.clamp(Math.round(dragging.tilt - (event.clientY - dragging.y) * 0.3), 5, 85)
+      if (tilt !== useAnimationStore.getState().tilt) useAnimationStore.getState().setTilt(tilt)
+    }
+    const up = (event: PointerEvent) => {
+      if (dragging && event.pointerId === dragging.id) {
+        swallowClick = dragging.moved
+        dragging = null
+      }
+    }
+    // A tilt drag is not a click: the release must not select what is under the cursor.
+    const click = (event: MouseEvent) => {
+      if (!swallowClick) return
+      swallowClick = false
+      event.stopPropagation()
+      event.preventDefault()
+    }
+    const wheel = (event: WheelEvent) => {
+      event.preventDefault()
+      const { zoom, setZoom } = useAnimationStore.getState()
+      setZoom(THREE.MathUtils.clamp(Math.round(zoom * (1 - event.deltaY * 0.001) * 100) / 100, 0.5, 2))
+    }
+    canvas.addEventListener('pointerdown', down)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    canvas.addEventListener('wheel', wheel, { passive: false })
+    window.addEventListener('click', click, true)
+    return () => {
+      window.removeEventListener('click', click, true)
+      controls.enabled = wasEnabled
+      canvas.removeEventListener('pointerdown', down)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      canvas.removeEventListener('wheel', wheel)
+    }
+  }, [controls, locked, canvas])
 
   // Unmounting (a new project, a crash fallback) must never leave the house half built.
   useEffect(() => () => {
