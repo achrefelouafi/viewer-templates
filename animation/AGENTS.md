@@ -176,8 +176,9 @@ rules are in [listing's AGENTS.md](../listing/AGENTS.md#sign-in-with-pascal). In
   and the viewer turns Pascal's daylight off while it is on (`useNoirActive`). Each floor gets a
   `PaperSheet` (`paper.tsx`) printed with that floor's plan from Pascal's own `def.floorplan`
   geometry and named as the navigator names it; it unfolds, the floor extrudes out of it, and
-  `ink.ts` develops the floor into colour. The look switches in and out behind `LookCurtain.tsx` (a
-  CSS circle of the Noir background over the stage: `appliedLook` in the store follows what the build
+  `ink.ts` develops the floor into colour. The look switches in and out behind `LookCurtain.tsx` (the
+  Noir background over the stage, as CSS: a circle growing from the middle on the way in, a fade
+  over the finished building on the way out; `appliedLook` in the store follows what the build
   wants once covered), and a finished build holds a beat, then switches back and is put back.
 - **Heavy animations are prepared ahead** (`Precompiler.tsx`, mounted by `BuildAnimator`): a moment
   after the project appears, in slices of a few milliseconds a frame, it draws Blueprint's floor

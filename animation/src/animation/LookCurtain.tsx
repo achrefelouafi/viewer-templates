@@ -5,15 +5,21 @@ import { useAnimationStore } from './store'
 /**
  * The transition between the viewer's own look and a template's (Blueprint's Noir). The scene can't
  * blend two looks (the lights, the sky and every surface change at once), so the switch happens
- * behind a curtain: a circle of the Noir background grows from the middle of the stage until it
- * covers it, the look switches (the new shaders build unseen), and the curtain fades away. Plain
- * CSS over the canvas: it costs the 3D nothing.
+ * behind a curtain of the Noir background. Into the template's look, a circle of it grows from the
+ * middle of the stage until it covers it; back out at the end, it fades in over the finished
+ * building instead, so the house dissolves into the background. Either way the look switches
+ * while covered (the new shaders build unseen) and the curtain fades away. Plain CSS over the
+ * canvas: it costs the 3D nothing.
  */
 
 const COVER_MS = 420
+/** The fade in over the finished building, on the way back to the viewer's own look. */
+const FADE_COVER_MS = 650
 /** Held covered after the switch: the new look's first frames (and its shaders) draw unseen. */
 const SETTLE_MS = 160
 const REVEAL_MS = 420
+/** The fade back out onto the viewer's own look. */
+const FADE_REVEAL_MS = 750
 
 type Phase = 'open' | 'closing' | 'closed' | 'opening'
 
@@ -23,6 +29,8 @@ export function LookCurtain() {
   const wanted = useNoirWanted() ? 'noir' : 'default'
   const applied = useAnimationStore((state) => state.appliedLook)
   const [phase, setPhase] = useState<Phase>('open')
+  // Into the template's look the curtain is a growing circle; back out, a plain fade.
+  const [fade, setFade] = useState(false)
   const token = useRef(0)
 
   useEffect(() => {
@@ -33,13 +41,15 @@ export function LookCurtain() {
       return
     }
     const later = (ms: number, run: () => void) => window.setTimeout(() => token.current === mine && run(), ms)
+    const fading = wanted === 'default'
+    setFade(fading)
     setPhase('closing')
-    later(COVER_MS, () => {
+    later(fading ? FADE_COVER_MS : COVER_MS, () => {
       setPhase('closed')
       useAnimationStore.setState({ appliedLook: wanted })
       later(SETTLE_MS, () => {
         setPhase('opening')
-        later(REVEAL_MS, () => setPhase('open'))
+        later(fading ? FADE_REVEAL_MS : REVEAL_MS, () => setPhase('open'))
       })
     })
     // No cleanup: switching the look re-runs this effect, and the curtain must still open. A newer
@@ -55,16 +65,19 @@ export function LookCurtain() {
       style={{
         zIndex: 5,
         background: 'radial-gradient(circle at 50% 50%, #3a3e44 0%, #16181b 45%, #08090a 85%)',
-        clipPath: covered || phase === 'closing' ? undefined : 'circle(0% at 50% 50%)',
+        clipPath: fade || covered || phase === 'closing' ? undefined : 'circle(0% at 50% 50%)',
         animation: phase === 'closing'
-          ? `look-curtain-close ${COVER_MS}ms cubic-bezier(0.55, 0, 0.75, 0.4) both`
+          ? fade
+            ? `look-curtain-fade-in ${FADE_COVER_MS}ms ease-in-out both`
+            : `look-curtain-close ${COVER_MS}ms cubic-bezier(0.55, 0, 0.75, 0.4) both`
           : phase === 'opening'
-            ? `look-curtain-open ${REVEAL_MS}ms ease-out both`
+            ? `look-curtain-open ${fade ? FADE_REVEAL_MS : REVEAL_MS}ms ease-out both`
             : undefined,
       }}
     >
       <style>{`
         @keyframes look-curtain-close { from { clip-path: circle(0% at 50% 50%) } to { clip-path: circle(75% at 50% 50%) } }
+        @keyframes look-curtain-fade-in { from { opacity: 0 } to { opacity: 1 } }
         @keyframes look-curtain-open { from { opacity: 1 } to { opacity: 0 } }
       `}</style>
     </div>
