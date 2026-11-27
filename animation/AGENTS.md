@@ -196,5 +196,15 @@ rules are in [listing's AGENTS.md](../listing/AGENTS.md#sign-in-with-pascal). In
   animation material discards (`warmup.ts`: put `notWarmup()` in the mask of any new animation
   material); three builds a pipeline for Pascal's own scene pass and lights, which `compileAsync`
   would not match. These materials and textures are kept for the page, never disposed between runs.
+- **Render to video steps the frames itself**: the dock's Render opens `src/hud/RenderDialog.tsx`
+  (animation, 30 or 60 fps, resolution), and `FrameRecorder.tsx` (mounted by `BuildAnimator`)
+  renders it to an MP4 with WebCodecs through `mediabunny`, all in the browser. While it works,
+  Pascal's frame loop is paused (`renderPaused` on `Viewer`), the canvas is resized to the video's
+  size, and the recorder calls R3F's `advance` with a fixed `1 / fps` step (`renderClock` in
+  `render.ts`; the animator's `useFrame` uses it in place of the wall clock), so no frame is dropped.
+  Each frame is copied out of the canvas in the task that drew it, and the title card is drawn over
+  it. The video starts in the template's look (no curtain); `LookCurtain` stands down meanwhile.
+  Anything new that animates must take its time from the frame's delta or `renderClock`, never
+  `performance.now()`, or it will not show in a render.
 - **Overlays use single-sided node materials** and never raycast: a double-sided node material in
   Pascal's MRT scene pass breaks the WebGPU render context.

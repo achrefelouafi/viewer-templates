@@ -10,8 +10,10 @@ import { type BuildElement, type BuildSet, collectBuild } from './elements'
 import { clearFloorInk, floorInk, setFloorInk } from './ink'
 import { NoirLook } from './NoirLook'
 import { groundTopUnder, PaperSheet } from './paper'
+import { FrameRecorder } from './FrameRecorder'
 import { Precompiler } from './Precompiler'
 import { arrivalOf, createPose, poseAt, poseMatrix } from './poses'
+import { renderClock } from './render'
 import { useAnimationStore } from './store'
 import { type Caption, type Timeline, templateById } from './templates'
 
@@ -322,6 +324,12 @@ function updateCamera(run: Run, controls: Controls | null, cinematic: boolean) {
   frameBox(controls, keys[index]!.box, keys[index]!.polar)
 }
 
+/** The store's `runId` of the run on stage now (0 for none): a render waits for its own to start. */
+let liveRunId = 0
+export function startedRunId(): number {
+  return liveRunId
+}
+
 export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: boolean }) {
   const scene = useThree((state) => state.scene)
   const controls = useThree((state) => state.controls) as Controls | null
@@ -354,6 +362,7 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
       return
     }
     runRef.current = run
+    liveRunId = runId
     const store = useAnimationStore.getState()
     useAnimationStore.setState({ duration: run.timeline.duration, pieceCount: run.elements.length })
     if (store.seekTo !== null) run.time = store.seekTo
@@ -532,9 +541,11 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
   useFrame(() => {
     const run = runRef.current
     const now = performance.now()
-    // Wall-clock time, so a frame limiter or a slow GPU slows the picture, never the timeline.
-    const dt = lastFrameRef.current ? Math.min((now - lastFrameRef.current) / 1000, 0.25) : 1 / 60
-    lastFrameRef.current = now
+    // Wall-clock time, so a frame limiter or a slow GPU slows the picture, never the timeline. A
+    // render (`FrameRecorder`) steps the clock itself, exactly one video frame at a time.
+    const fixed = renderClock.step
+    const dt = fixed !== null ? fixed : lastFrameRef.current ? Math.min((now - lastFrameRef.current) / 1000, 0.25) : 1 / 60
+    lastFrameRef.current = fixed !== null ? 0 : now
     if (!run) return
     const state = useAnimationStore.getState()
     const previous = run.time
@@ -589,6 +600,8 @@ export function BuildAnimator({ source, ready }: { source: ViewerSource; ready: 
     <>
       {/* Gets the heavy animations ready while the project is on screen. */}
       <Precompiler ready={ready} source={source} />
+      {/* Renders a build to a video, frame by frame, when the Render dialog asks. */}
+      <FrameRecorder />
       {noir && <NoirLook source={source} />}
     </>
   )

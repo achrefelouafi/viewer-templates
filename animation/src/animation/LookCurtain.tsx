@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNoirWanted } from './BuildAnimator'
+import { useRendering } from './render'
 import { useAnimationStore } from './store'
 
 /**
@@ -60,8 +61,15 @@ export function LookCurtain() {
   // Into the template's look the curtain is a growing circle; back out, a plain fade.
   const [fade, setFade] = useState(false)
   const token = useRef(0)
+  // A render switches the look itself, with no curtain (the video starts in the template's look).
+  const rendering = useRendering()
 
   useEffect(() => {
+    if (rendering) {
+      token.current++
+      setPhase('open')
+      return
+    }
     if (wanted === applied) return
     const mine = ++token.current
     if (reducedMotion()) {
@@ -84,7 +92,7 @@ export function LookCurtain() {
     })
     // No cleanup: switching the look re-runs this effect, and the curtain must still open. A newer
     // switch takes over through `token` (the old timers then do nothing).
-  }, [wanted, applied])
+  }, [wanted, applied, rendering])
 
   if (phase === 'open') return null
   const covered = phase === 'closed' || phase === 'opening'

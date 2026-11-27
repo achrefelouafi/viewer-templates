@@ -5,6 +5,7 @@ import { AnimationStudio } from './AnimationStudio'
 import { Inspector, type InspectorTabId } from './Inspector'
 import { ModeDock } from './ModeDock'
 import { NavigatorRail } from './NavigatorRail'
+import { RenderDialog } from './RenderDialog'
 
 const RAIL_STORAGE_KEY = 'pascal-hud:rail-collapsed'
 const TAB_STORAGE_KEY = 'pascal-hud:inspector-tab'
@@ -122,6 +123,7 @@ export function HudShell({
         hasFloorplan={hasFloorplan}
         onOpenAnimate={handleOpenAnimate}
         onStageModeChange={onStageModeChange}
+        canRender={ready}
         showModes={!hideBottomBar && stageMode === '3d'}
         stageMode={stageMode}
       />
@@ -143,6 +145,8 @@ export function HudShell({
           ready={ready}
         />
       )}
+
+      {stageMode === '3d' && <RenderDialog projectName={projectName} ready={ready} />}
     </TooltipProvider>
   )
 }

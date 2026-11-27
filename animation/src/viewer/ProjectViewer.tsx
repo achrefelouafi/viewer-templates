@@ -35,6 +35,7 @@ import { viewerFlagsFromLocation } from '../config'
 import type { SceneResponse } from '../pascal'
 import { AnimationCaption } from '../animation/AnimationCaption'
 import { LookCurtain } from '../animation/LookCurtain'
+import { useRendering } from '../animation/render'
 import { BuildAnimator, useNoirActive } from '../animation/BuildAnimator'
 import { HudShell } from '../hud/HudShell'
 import { pluginInstallStateOf, publishedSceneSetup } from '../runtime/plugins'
@@ -127,6 +128,8 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
   const [loading, setLoading] = useState(true)
   // The Blueprint build's Noir look: no daylight sky, so its background and grey glow show.
   const noirLook = useNoirActive()
+  // A video render steps the frames itself: Pascal's own frame loop pauses meanwhile.
+  const rendering = useRendering()
   const [presentedScene, setPresentedScene] = useState(false)
   const [sceneReady, setSceneReady] = useState(false)
   const [glbReady, setGlbReady] = useState(false)
@@ -274,6 +277,7 @@ export function ProjectViewer({ scene, glbUrl, runtimeRevision }: {
                 onSceneReadyChange={onSceneReady}
                 presentation={glbUrl ? bakedPresentation : undefined}
                 renderContext="viewer"
+                renderPaused={rendering}
                 sceneReadyKey={sceneIdentity}
                 // "custom" with none mounted: no hover or selection in the 3D scene.
                 selectionManager="custom"

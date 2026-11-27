@@ -1,7 +1,8 @@
 import { useViewer } from '@pascal-app/viewer'
 import { playSound } from '@pascal-app/viewer/sfx'
 import type { ViewerStageMode } from '@pascal-app/viewer/ui'
-import { Orbit, Sparkles } from 'lucide-react'
+import { Clapperboard, Orbit, Sparkles } from 'lucide-react'
+import { useRenderStore } from '../animation/render'
 import { useAnimationStore } from '../animation/store'
 import { ViewMenu } from './ViewMenu'
 
@@ -28,7 +29,7 @@ function ProgressRing({ progress }: { progress: number }) {
   )
 }
 
-export function ModeDock({ animateOpen, onOpenAnimate, stageMode, onStageModeChange, hasFloorplan, showModes }: {
+export function ModeDock({ animateOpen, onOpenAnimate, stageMode, onStageModeChange, hasFloorplan, showModes, canRender }: {
   animateOpen: boolean
   onOpenAnimate: () => void
   stageMode: ViewerStageMode
@@ -37,6 +38,8 @@ export function ModeDock({ animateOpen, onOpenAnimate, stageMode, onStageModeCha
   hasFloorplan: boolean
   /** Orbit and Animate: 3D only, and not with hideBottomBar. */
   showModes: boolean
+  /** The scene is on screen: a build can be rendered to video. */
+  canRender: boolean
 }) {
   const walkthroughMode = useViewer((s) => s.walkthroughMode)
 
@@ -99,6 +102,24 @@ export function ModeDock({ animateOpen, onOpenAnimate, stageMode, onStageModeCha
               <Sparkles aria-hidden className="size-4" />
             </span>
             <span>Animate</span>
+          </button>
+        </div>
+
+        {/* Render: a build animation to an MP4, every frame. */}
+        <div className="studio-hud-light pointer-events-auto flex items-center rounded-full p-1">
+          <button
+            aria-label="Render video"
+            className={`${segmentClass(false)} disabled:pointer-events-none disabled:opacity-40`}
+            disabled={!canRender}
+            onClick={() => {
+              playSound('menuClick')
+              useRenderStore.getState().openDialog()
+            }}
+            title="Render an animation to a video"
+            type="button"
+          >
+            <Clapperboard aria-hidden className="size-4 shrink-0" />
+            <span className="hidden sm:inline">Render</span>
           </button>
         </div>
         </>)}
